@@ -591,13 +591,31 @@ class Game {
     // Gravity
     this.velocity.y += this.gravity * dt;
 
-    // Apply movement via Babylon physics
-    const moveVec = new BABYLON.Vector3(
-      this.moveVelocity.x * speedMult * dt,
-      this.velocity.y * dt,
-      this.moveVelocity.z * speedMult * dt
-    );
-    this.camera.moveWithCollisions(moveVec);
+    // Apply movement with custom AABB sliding collision
+    let nextX = this.camera.position.x + this.moveVelocity.x * speedMult * dt;
+    let nextZ = this.camera.position.z + this.moveVelocity.z * speedMult * dt;
+    let canMoveX = true;
+    let canMoveZ = true;
+
+    if (this.mapData && this.mapData.obstacles) {
+      const padding = 0.5; // Player radius for collision
+      for (const obs of this.mapData.obstacles) {
+        // Check X movement
+        if (nextX > obs.min.x - padding && nextX < obs.max.x + padding &&
+            this.camera.position.z > obs.min.z - padding && this.camera.position.z < obs.max.z + padding) {
+          canMoveX = false;
+        }
+        // Check Z movement
+        if (this.camera.position.x > obs.min.x - padding && this.camera.position.x < obs.max.x + padding &&
+            nextZ > obs.min.z - padding && nextZ < obs.max.z + padding) {
+          canMoveZ = false;
+        }
+      }
+    }
+
+    if (canMoveX) this.camera.position.x = nextX;
+    if (canMoveZ) this.camera.position.z = nextZ;
+    this.camera.position.y += this.velocity.y * dt;
 
     if (this.camera.position.y <= this.playerHeight) {
       this.camera.position.y = this.playerHeight;
