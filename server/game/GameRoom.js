@@ -94,7 +94,12 @@ const MAPS = {
       { min: { x: 12, z: 12 }, max: { x: 22, z: 22 }, height: 12 },   // Building D
       { min: { x: -6, z: -4 }, max: { x: 6, z: 4 }, height: 2.5 },    // Center Vehicles
       { min: { x: -28, z: -8 }, max: { x: -22, z: 8 }, height: 15 },  // Tall corner NW
-      { min: { x: 22, z: -8 }, max: { x: 28, z: 8 }, height: 15 }     // Tall corner SE
+      { min: { x: 22, z: -8 }, max: { x: 28, z: 8 }, height: 15 },    // Tall corner SE
+      // Extra obstacles for complexity
+      { min: { x: -8, z: -18 }, max: { x: 8, z: -12 }, height: 6 },
+      { min: { x: -8, z: 12 }, max: { x: 8, z: 18 }, height: 6 },
+      { min: { x: -28, z: -28 }, max: { x: -20, z: -20 }, height: 8 },
+      { min: { x: 20, z: 20 }, max: { x: 28, z: 28 }, height: 8 }
     ]
   }
 };
@@ -173,7 +178,7 @@ class GameRoom {
       const id = `bot_${uuidv4().slice(0, 8)}`;
       const name = BOT_NAMES[i % BOT_NAMES.length];
       const team = this.gameState.getSpawnTeam(this.players.size + this.bots.size);
-      const bot = new Bot(id, `[BOT] ${name}`, team);
+      const bot = new Bot(id, `[BOT] ${name}`, team, 'random');
       const spawn = this.getSpawnPoint(team);
       bot.respawn(spawn);
       this.bots.set(id, bot);
@@ -252,8 +257,9 @@ class GameRoom {
 
     // Update bots
     const allEntities = [...this.players.values(), ...this.bots.values()];
+    const mapObstacles = MAPS[this.mapId]?.obstacles || [];
     for (const [id, bot] of this.bots) {
-      const actions = bot.update(allEntities, dt);
+      const actions = bot.update(allEntities, dt, mapObstacles);
       if (actions) {
         for (const action of actions) {
           if (action.type === 'shoot') {

@@ -575,15 +575,12 @@ class Game {
         this.moveVelocity.x += (targetVx - this.moveVelocity.x) * t;
         this.moveVelocity.z += (targetVz - this.moveVelocity.z) * t;
       } else {
-        // Friction deceleration
-        const t = 1 - Math.exp(-this.deceleration * dt);
-        this.moveVelocity.x *= (1 - t);
-        this.moveVelocity.z *= (1 - t);
-      }
-      const speedMult = this.crouching ? 0.5 : 1.0;
-      this.camera.position.x += this.moveVelocity.x * speedMult * dt;
-      this.camera.position.z += this.moveVelocity.z * speedMult * dt;
+      // Friction deceleration
+      const t = 1 - Math.exp(-this.deceleration * dt);
+      this.moveVelocity.x *= (1 - t);
+      this.moveVelocity.z *= (1 - t);
     }
+    const speedMult = this.crouching ? 0.5 : 1.0;
 
     // Jump
     if (this.input.isKeyDown('Space') && this.grounded) {
@@ -593,7 +590,14 @@ class Game {
 
     // Gravity
     this.velocity.y += this.gravity * dt;
-    this.camera.position.y += this.velocity.y * dt;
+
+    // Apply movement via Babylon physics
+    const moveVec = new BABYLON.Vector3(
+      this.moveVelocity.x * speedMult * dt,
+      this.velocity.y * dt,
+      this.moveVelocity.z * speedMult * dt
+    );
+    this.camera.moveWithCollisions(moveVec);
 
     if (this.camera.position.y <= this.playerHeight) {
       this.camera.position.y = this.playerHeight;

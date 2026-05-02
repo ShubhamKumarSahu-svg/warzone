@@ -9,6 +9,10 @@ class Bot {
     this.name = name;
     this.team = team;
     this.isBot = true;
+    if (difficulty === 'random') {
+      const diffs = ['easy', 'normal', 'hard'];
+      difficulty = diffs[Math.floor(Math.random() * diffs.length)];
+    }
     this.difficulty = difficulty;
 
     // Difficulty settings
@@ -55,7 +59,7 @@ class Bot {
     return points;
   }
 
-  update(players, dt) {
+  update(players, dt, obstacles = []) {
     if (!this.alive) return null;
 
     const now = Date.now();
@@ -97,16 +101,50 @@ class Bot {
     }
 
     // Execute behavior
+    let proposedX = this.position.x;
+    let proposedZ = this.position.z;
+
     switch (this.state) {
-      case 'patrol':
-        actions.push(...this.doPatrol(dt));
+      case 'patrol': {
+        const move = this.doPatrol(dt);
+        proposedX = move.x;
+        proposedZ = move.z;
+        actions.push(...move.actions);
         break;
-      case 'combat':
-        actions.push(...this.doCombat(nearestEnemy, nearestDist, now));
+      }
+      case 'combat': {
+        const move = this.doCombat(nearestEnemy, nearestDist, now);
+        proposedX = move.x;
+        proposedZ = move.z;
+        actions.push(...move.actions);
         break;
-      case 'retreat':
-        actions.push(...this.doRetreat(nearestEnemy, dt));
+      }
+      case 'retreat': {
+        const move = this.doRetreat(nearestEnemy, dt);
+        proposedX = move.x;
+        proposedZ = move.z;
+        actions.push(...move.actions);
         break;
+      }
+    }
+
+    // Map collision check
+    let canMove = true;
+    for (const obs of obstacles) {
+      // Very basic bounding box check
+      if (proposedX > obs.min.x - 0.5 && proposedX < obs.max.x + 0.5 &&
+          proposedZ > obs.min.z - 0.5 && proposedZ < obs.max.z + 0.5) {
+        canMove = false;
+        break;
+      }
+    }
+
+    if (canMove) {
+      this.position.x = proposedX;
+      this.position.z = proposedZ;
+    } else {
+      // If stuck, pick new random waypoint
+      this.stuckTimer += 10; 
     }
 
     // Stuck detection
@@ -129,16 +167,18 @@ class Bot {
   }
 
   doPatrol(dt) {
-    if (!this.waypoints.length) return [];
+    let px = this.position.x;
+    let pz = this.position.z;
+    if (!this.waypoints.length) return { x: px, z: pz, actions: [] };
 
     const wp = this.waypoints[this.currentWaypoint];
-    const dx = wp.x - this.position.x;
-    const dz = wp.z - this.position.z;
+    const dx = wp.x - px;
+    const dz = wp.z - pz;
     const dist = Math.sqrt(dx * dx + dz * dz);
 
     if (dist < 2) {
       this.currentWaypoint = (this.currentWaypoint + 1) % this.waypoints.length;
-      return [];
+      return { x: px, z: pz, actions: [] };
     }
 
     // Move toward waypoint
@@ -146,20 +186,22 @@ class Bot {
     const angle = Math.atan2(dx, dz);
     this.rotation.y = angle;
 
-    this.position.x += Math.sin(angle) * speed;
-    this.position.z += Math.cos(angle) * speed;
+    px += Math.sin(angle) * speed;
+    pz += Math.cos(angle) * speed;
     this.moving = true;
 
-    return [];
+    return { x: px, z: pz, actions: [] };
   }
 
   doCombat(enemy, dist, now) {
-    if (!enemy) return [];
+    let px = this.position.x;
+    let pz = this.position.z;
+    if (!enemy) return { x: px, z: pz, actions: [] };
     const actions = [];
 
     // Aim at enemy
-    const dx = enemy.position.x - this.position.x;
-    const dz = enemy.position.z - this.position.z;
+    const dx = enemy.position.x - px;
+    const dz = enemy.position.z - pz;
     const dy = (enemy.position.y) - this.position.y;
     const hDist = Math.sqrt(dx * dx + dz * dz);
 
@@ -195,37 +237,39 @@ class Bot {
     // Strafe during combat
     if (dist > 10) {
       // Move closer
-      this.position.x += Math.sin(this.rotation.y) * 3 * (1 / 60);
-      this.position.z += Math.cos(this.rotation.y) * 3 * (1 / 60);
+      px += Math.sin(this.rotation.y) * 3 * (1 / 60);
+      pz += Math.cos(this.rotation.y) * 3 * (1 / 60);
     } else if (dist < 5) {
       // Back up
-      this.position.x -= Math.sin(this.rotation.y) * 2 * (1 / 60);
-      this.position.z -= Math.cos(this.rotation.y) * 2 * (1 / 60);
+      px -= Math.sin(this.rotation.y) * 2 * (1 / 60);
+      pz -= Math.cos(this.rotation.y) * 2 * (1 / 60);
     } else {
       // Strafe
       const strafeDir = Math.sin(now * 0.002) > 0 ? 1 : -1;
       const perpAngle = this.rotation.y + Math.PI / 2;
-      this.position.x += Math.sin(perpAngle) * strafeDir * 2 * (1 / 60);
-      this.position.z += Math.cos(perpAngle) * strafeDir * 2 * (1 / 60);
+      px += Math.sin(perpAngle) * strafeDir * 2 * (1 / 60);
+      pz += Math.cos(perpAngle) * strafeDir * 2 * (1 / 60);
     }
     this.moving = true;
 
-    return actions;
+    return { x: px, z: pz, actions };
   }
 
   doRetreat(enemy, dt) {
+    let px = this.position.x;
+    let pz = this.position.z;
     if (enemy) {
-      const dx = this.position.x - enemy.position.x;
-      const dz = this.position.z - enemy.position.z;
+      const dx = px - enemy.position.x;
+      const dz = pz - enemy.position.z;
       const angle = Math.atan2(dx, dz);
       const speed = 6 * this.settings.moveSpeed * dt;
 
-      this.position.x += Math.sin(angle) * speed;
-      this.position.z += Math.cos(angle) * speed;
+      px += Math.sin(angle) * speed;
+      pz += Math.cos(angle) * speed;
       this.rotation.y = angle + Math.PI;
     }
     this.moving = true;
-    return [];
+    return { x: px, z: pz, actions: [] };
   }
 
   takeDamage(amount, attackerId) {
