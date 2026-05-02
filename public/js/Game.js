@@ -82,6 +82,7 @@ class Game {
   }
 
   async init(playerData, roomData) {
+    try {
     this.playerId = playerData.id;
     this.selfState = playerData;
     this.mapData = roomData.mapData;
@@ -133,7 +134,16 @@ class Game {
       const tipEl = document.getElementById('loading-tip');
       if (tipEl) tipEl.textContent = label;
     };
-    await this.assetLoader.preloadAll();
+    const loadTimeout = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Asset load timeout')), 10000)
+    );
+
+    try {
+      await Promise.race([this.assetLoader.preloadAll(), loadTimeout]);
+    } catch (err) {
+      console.warn('Asset load failed, using fallbacks:', err);
+      // Continue anyway — your code already has box fallbacks
+    }
 
     // Build map (needs assetLoader for City Builder tiles)
     this.map = new MapManager(this.scene);
@@ -170,6 +180,10 @@ class Game {
     this.canvas.addEventListener('click', () => {
       if (!this.paused) this.input.requestPointerLock();
     });
+
+    } catch (err) {
+      console.error('Game init failed:', err);
+    }
   }
 
   createWeaponModel() {
