@@ -6,8 +6,8 @@ class PlayerController {
     this.maxMoveSpeed = 8;
     this.acceleration = 10;
     this.deceleration = 12;
-    this.jumpForce = 8;
-    this.gravity = -20;
+    this.jumpForce = 12;
+    this.gravity = -25;
     this.playerHeight = 1.8;
     this.playerRadius = 0.5;
 

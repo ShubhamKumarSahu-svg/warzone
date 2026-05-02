@@ -608,7 +608,7 @@ class Game {
     this.updateReloadAnim(dt);
     this.fxManager.update(dt);
     this.interpolateOtherPlayers(dt);
-    this.updateSlide(dt);    // [G8] camera roll – was never called in old loop
+    this.updateCameraAndWeapon(dt);
     this.updatePerfHUD(dt);
     this.scene.render();
 
@@ -718,24 +718,46 @@ class Game {
     }
   }
 
-  updateSlide(dt) {
-    if (this.slideCooldown > 0) this.slideCooldown -= dt;
-
-    if (this.sliding) {
-      this.slideTimer -= dt;
-      const sf = Math.max(0, this.slideTimer / this.slideDuration);
-      this.camera.position.x += this.slideDir.x * this.slideSpeed * sf * dt;
-      this.camera.position.z += this.slideDir.z * this.slideSpeed * sf * dt;
-      this.targetRoll = 0.08;
-      this.playerHeight = 1.2;
-      if (this.slideTimer <= 0) { this.sliding = false; this.playerHeight = 1.8; }
+  updateCameraAndWeapon(dt) {
+    // Camera roll (tilt when strafing or sliding)
+    const pState = this.playerController.getState();
+    const move = this.input.getMovement();
+    
+    if (pState.crouching && pState.moving) {
+      this.targetRoll = 0.05; // Slide roll
     } else {
-      const move = this.input.getMovement();
-      this.targetRoll = move.right * -0.03;
+      this.targetRoll = move.right * -0.04; // Strafe roll
     }
 
     this.cameraRoll += (this.targetRoll - this.cameraRoll) * (1 - Math.exp(-10 * dt));
     this.camera.rotation.z = this.cameraRoll;
+
+    // Weapon Sway and Bobbing
+    if (this.weaponRoot && !this.isReloadAnimating && !this._kickTimer) {
+      // Sway based on mouse movement
+      const mouseDelta = this.input.getMouseDelta();
+      const targetSwayX = -mouseDelta.dx * 0.05;
+      const targetSwayY = mouseDelta.dy * 0.05;
+
+      // Bobbing based on movement
+      let targetBobX = 0;
+      let targetBobY = 0;
+
+      if (pState.moving && pState.grounded) {
+        this.bobTimer = (this.bobTimer || 0) + dt * (pState.crouching ? 8 : 12);
+        targetBobX = Math.sin(this.bobTimer) * 0.015;
+        targetBobY = Math.abs(Math.cos(this.bobTimer)) * 0.02;
+      } else {
+        this.bobTimer = 0;
+      }
+
+      // Smoothly interpolate weapon position
+      const targetPosX = this.weaponRestPos.x + targetSwayX + targetBobX;
+      const targetPosY = this.weaponRestPos.y + targetSwayY + targetBobY;
+      
+      this.weaponRoot.position.x += (targetPosX - this.weaponRoot.position.x) * 10 * dt;
+      this.weaponRoot.position.y += (targetPosY - this.weaponRoot.position.y) * 10 * dt;
+    }
   }
 
   // ─── [G2] Interpolate + animate other players ─────────────────────────────────
