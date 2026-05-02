@@ -446,6 +446,18 @@ class GameRoom {
     let closestHit = null;
     let closestDist = weapon.range.max;
 
+    // Check map walls
+    const map = MAPS[this.mapId];
+    if (map && map.obstacles) {
+      for (const obs of map.obstacles) {
+        const hit = this.rayBoxIntersect(shotData.position, dir, obs.min, obs.max, obs.height || 3);
+        if (hit && hit.distance < closestDist) {
+          closestDist = hit.distance;
+          closestHit = null; // Wall blocks the shot
+        }
+      }
+    }
+
     const allTargets = [...this.players.values(), ...this.bots.values()];
 
     for (const target of allTargets) {
@@ -505,6 +517,31 @@ class GameRoom {
     if (hitY < center.y - 0.5 || hitY > center.y + height * 0.5) return null;
 
     return { distance: t };
+  }
+
+  rayBoxIntersect(origin, dir, min, max, height) {
+    let tmin = (min.x - origin.x) / dir.x;
+    let tmax = (max.x - origin.x) / dir.x;
+    if (tmin > tmax) { const temp = tmin; tmin = tmax; tmax = temp; }
+
+    let tymin = (0 - origin.y) / dir.y;
+    let tymax = (height - origin.y) / dir.y;
+    if (tymin > tymax) { const temp = tymin; tymin = tymax; tymax = temp; }
+
+    if ((tmin > tymax) || (tymin > tmax)) return null;
+    if (tymin > tmin) tmin = tymin;
+    if (tymax < tmax) tmax = tymax;
+
+    let tzmin = (min.z - origin.z) / dir.z;
+    let tzmax = (max.z - origin.z) / dir.z;
+    if (tzmin > tzmax) { const temp = tzmin; tzmin = tzmax; tzmax = temp; }
+
+    if ((tmin > tzmax) || (tzmin > tmax)) return null;
+    if (tzmin > tmin) tmin = tzmin;
+    if (tzmax < tmax) tmax = tzmax;
+
+    if (tmax < 0) return null;
+    return { distance: tmin > 0 ? tmin : tmax };
   }
 
   processHit(attackerId, hitResult) {

@@ -84,10 +84,8 @@ class AssetLoader {
 
     for (const name of AssetLoader.CHARACTERS) {
       try {
-        const result = await BABYLON.SceneLoader.ImportMeshAsync('', basePath, `${name}.glb`, this.scene);
-        // Hide template meshes
-        result.meshes.forEach(m => { m.setEnabled(false); m.isPickable = false; });
-        this.characterTemplates[name] = result;
+        const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(basePath, `${name}.glb`, this.scene);
+        this.characterTemplates[name] = container;
       } catch (e) {
         console.warn(`AssetLoader: Could not load character ${name}:`, e.message);
       }
@@ -177,14 +175,16 @@ class AssetLoader {
     const template = this.characterTemplates[characterName || AssetLoader.CHARACTER_FOR_TEAM[teamId] || 'Knight'];
     if (!template) return null;
 
-    const root = template.meshes[0].clone('player_' + Date.now());
+    const inst = template.instantiateModelsToScene(name => 'player_' + Date.now() + '_' + name, false, { doNotInstantiate: true });
+    const root = inst.rootNodes[0];
     if (!root) return null;
 
-    root.setEnabled(true);
     root.getChildMeshes().forEach(m => {
-      m.setEnabled(true);
       m.isPickable = false;
     });
+
+    // Store animation groups in root for easy access
+    root.animationGroups = inst.animationGroups;
 
     // Scale character to ~1.8 unit height (character models are roughly 1 unit)
     root.scaling = new BABYLON.Vector3(0.9, 0.9, 0.9);
@@ -277,7 +277,7 @@ class AssetLoader {
   // ─── Dispose All Templates ───────────────────────────
   dispose() {
     for (const t of Object.values(this.characterTemplates)) {
-      t.meshes.forEach(m => m.dispose());
+      t.dispose();
     }
     for (const t of Object.values(this.weaponTemplates)) {
       t.meshes.forEach(m => m.dispose());

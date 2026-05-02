@@ -166,24 +166,40 @@ class MapManager {
       const cx = (obs.min.x + obs.max.x) / 2;
       const cz = (obs.min.z + obs.max.z) / 2;
 
-      const box = BABYLON.MeshBuilder.CreateBox('obstacle_' + i, { width: w, height: h, depth: d }, this.scene);
-      box.position.set(cx, h / 2, cz);
-      const mat = new BABYLON.StandardMaterial('obsMat_' + i, this.scene);
-      mat.diffuseColor = colors[i % colors.length];
-      mat.specularColor = new BABYLON.Color3(0.03, 0.03, 0.03);
-      box.material = mat;
-      box.checkCollisions = true;
-      box.receiveShadows = true;
-      this.meshes.push(box);
-      this.obstacles.push({ mesh: box, min: obs.min, max: obs.max, height: h });
+      // Place City Builder asset if AssetLoader is available
+      if (this.assetLoader) {
+        let buildingType = 'building_A';
+        if (h >= 15) buildingType = 'building_G';
+        else if (h >= 10) buildingType = 'building_D';
+        else if (h >= 8) buildingType = 'building_C';
+        else if (h >= 6) buildingType = 'building_B';
+        else buildingType = 'building_E';
 
-      // Edge highlight
-      const edges = BABYLON.MeshBuilder.CreateBox('obsEdge_' + i, { width: w + 0.05, height: 0.04, depth: d + 0.05 }, this.scene);
-      edges.position.set(cx, h, cz);
-      const edgeMat = new BABYLON.StandardMaterial('edgeMat_' + i, this.scene);
-      edgeMat.diffuseColor = new BABYLON.Color3(0.4, 0.35, 0.25);
-      edgeMat.emissiveColor = new BABYLON.Color3(0.05, 0.04, 0.02);
-      edges.material = edgeMat;
+        const mesh = this.assetLoader.placeMapPiece(buildingType, new BABYLON.Vector3(cx, 0, cz));
+        if (mesh) {
+          mesh.rotation.y = (Math.PI / 2) * (i % 4);
+          this.addShadowCaster(mesh);
+        }
+
+        // Invisible collision box
+        const box = BABYLON.MeshBuilder.CreateBox('col_' + i, { width: w, height: h, depth: d }, this.scene);
+        box.position.set(cx, h / 2, cz);
+        box.isVisible = false;
+        box.checkCollisions = true;
+        this.obstacles.push({ mesh: box, min: obs.min, max: obs.max, height: h });
+      } else {
+        // Fallback to block
+        const box = BABYLON.MeshBuilder.CreateBox('obstacle_' + i, { width: w, height: h, depth: d }, this.scene);
+        box.position.set(cx, h / 2, cz);
+        const mat = new BABYLON.StandardMaterial('obsMat_' + i, this.scene);
+        mat.diffuseColor = colors[i % colors.length];
+        mat.specularColor = new BABYLON.Color3(0.03, 0.03, 0.03);
+        box.material = mat;
+        box.checkCollisions = true;
+        box.receiveShadows = true;
+        this.meshes.push(box);
+        this.obstacles.push({ mesh: box, min: obs.min, max: obs.max, height: h });
+      }
     });
 
     // Control points / bomb sites visual markers

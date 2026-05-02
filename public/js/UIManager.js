@@ -174,7 +174,7 @@ class UIManager {
     while (el.children.length > 50) el.removeChild(el.firstChild);
   }
 
-  updateMinimap(selfPos, players, mapSize) {
+  updateMinimap(selfPos, players, mapSize, selfTeam) {
     const canvas = this.el('minimap-canvas');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -199,7 +199,7 @@ class UIManager {
         const rx = (p.position.x - selfPos.x) * scale + w / 2;
         const ry = (p.position.z - selfPos.z) * scale + h / 2;
         if (rx < 0 || rx > w || ry < 0 || ry > h) return;
-        ctx.fillStyle = p.team === 0 ? '#4488ff' : p.team === 1 ? '#ff4444' : '#ffaa00';
+        ctx.fillStyle = (selfTeam !== undefined && p.team === selfTeam) ? '#4488ff' : '#ff4444';
         ctx.beginPath();
         ctx.arc(rx, ry, 3, 0, Math.PI * 2);
         ctx.fill();

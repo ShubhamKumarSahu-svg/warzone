@@ -260,7 +260,8 @@ class Game {
         this.ui.updateMinimap(
           this.camera.position,
           msg.players,
-          this.mapData?.size?.x || 60
+          this.mapData?.size?.x || 60,
+          this.selfState?.team
         );
       }
     });
@@ -275,6 +276,10 @@ class Game {
 
     net.on('hit_confirm', (msg) => {
       this.ui.showHitMarker(msg.headshot);
+      const target = this.otherPlayers[msg.targetId];
+      if (target && target.mesh) {
+        this.showFloatingDamage(target.mesh.position, msg.damage, msg.headshot);
+      }
     });
 
     net.on('damage_taken', (msg) => {
@@ -441,7 +446,9 @@ class Game {
     const nameTex = new BABYLON.DynamicTexture('nameTex_' + data.id, { width: 256, height: 40 }, this.scene);
     const nameCtx = nameTex.getContext();
     nameCtx.clearRect(0, 0, 256, 40);
-    nameCtx.fillStyle = '#ffffff';
+    const isTeammate = data.team === this.selfState?.team;
+    
+    nameCtx.fillStyle = isTeammate ? '#4488ff' : '#ff4444';
     nameCtx.font = 'bold 24px Arial';
     nameCtx.textAlign = 'center';
     nameCtx.fillText(data.username || data.id.slice(0, 8), 128, 28);
@@ -453,6 +460,26 @@ class Game {
     nameMat.hasAlpha = true;
     nameMat.useAlphaFromDiffuseTexture = true;
     nameplane.material = nameMat;
+
+    // Red/Blue 3D Marker
+    const markerMat = new BABYLON.StandardMaterial('markerMat_' + data.id, this.scene);
+    markerMat.diffuseColor = isTeammate ? new BABYLON.Color3(0.2, 0.5, 1) : new BABYLON.Color3(1, 0.2, 0.2);
+    markerMat.emissiveColor = markerMat.diffuseColor;
+    markerMat.disableLighting = true;
+
+    const marker = BABYLON.MeshBuilder.CreateCylinder('marker_' + data.id, { diameterTop: 0.2, diameterBottom: 0, height: 0.3, tessellation: 4 }, this.scene);
+    marker.parent = root;
+    marker.position.y = characterModel ? 2.5 : 2.0;
+    marker.rotation.x = Math.PI;
+    marker.material = markerMat;
+
+    // Bobbing animation for marker
+    this.scene.onBeforeRenderObservable.add(() => {
+      if (!marker.isDisposed()) {
+        marker.position.y = (characterModel ? 2.5 : 2.0) + Math.sin(performance.now() * 0.005) * 0.1;
+        marker.rotation.y += 0.02;
+      }
+    });
 
     this.otherPlayers[data.id] = { mesh: root, state: data, head, torso };
   }
@@ -860,9 +887,24 @@ class Game {
     const t = 1 - Math.exp(-lerpSpeed * dt);
     for (const op of Object.values(this.otherPlayers)) {
       if (!op.targetPosition) continue;
+      
+      const dist = BABYLON.Vector3.Distance(op.mesh.position, op.targetPosition);
       op.mesh.position = BABYLON.Vector3.Lerp(op.mesh.position, op.targetPosition, t);
       const dAngle = op.targetRotation - op.mesh.rotation.y;
       op.mesh.rotation.y += dAngle * t;
+
+      // Handle Animations
+      if (op.mesh.animationGroups && op.mesh.animationGroups.length > 0) {
+        let targetAnimName = dist > 0.02 ? 'Run' : 'Idle';
+        
+        // Find matching animation
+        const targetAnim = op.mesh.animationGroups.find(ag => ag.name.includes(targetAnimName));
+        if (targetAnim && op.currentAnim !== targetAnimName) {
+          op.mesh.animationGroups.forEach(ag => { if (ag !== targetAnim) ag.stop(); });
+          targetAnim.play(true);
+          op.currentAnim = targetAnimName;
+        }
+      }
     }
   }
 
@@ -942,6 +984,47 @@ class Game {
       const cooldownMs = msg.abilityId === 'wall_charge' ? 45000 : 30000;
       this.ui.updateAbilityCooldown(Date.now() + cooldownMs);
     }
+  }
+
+  showFloatingDamage(position, damage, isHeadshot) {
+    const textPlane = BABYLON.MeshBuilder.CreatePlane('dmg', { width: 1.5, height: 0.5 }, this.scene);
+    textPlane.position = position.clone();
+    textPlane.position.y += 2.0; // Above head
+    textPlane.position.x += (Math.random() - 0.5) * 0.5;
+    textPlane.position.z += (Math.random() - 0.5) * 0.5;
+    textPlane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+
+    const dt = new BABYLON.DynamicTexture('dmgTex', { width: 256, height: 64 }, this.scene);
+    const ctx = dt.getContext();
+    ctx.clearRect(0, 0, 256, 64);
+    ctx.fillStyle = isHeadshot ? '#ff4444' : '#ffaa00';
+    ctx.font = 'bold 48px "Orbitron", Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(Math.round(damage).toString(), 128, 48);
+    dt.update();
+
+    const mat = new BABYLON.StandardMaterial('dmgMat', this.scene);
+    mat.diffuseTexture = dt;
+    mat.emissiveTexture = dt;
+    mat.disableLighting = true;
+    mat.hasAlpha = true;
+    mat.useAlphaFromDiffuseTexture = true;
+    textPlane.material = mat;
+
+    // Animation: float up and fade out
+    let life = 1.0;
+    const observer = this.scene.onBeforeRenderObservable.add(() => {
+      life -= this.scene.getEngine().getDeltaTime() / 1000.0;
+      if (life <= 0) {
+        textPlane.dispose();
+        mat.dispose();
+        dt.dispose();
+        this.scene.onBeforeRenderObservable.remove(observer);
+      } else {
+        textPlane.position.y += 0.02;
+        mat.alpha = life;
+      }
+    });
   }
 
   destroy() {
