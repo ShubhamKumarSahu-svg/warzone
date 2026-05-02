@@ -584,22 +584,33 @@ class Game {
     const move = this.input.getMovement();
     const isMoving = move.forward !== 0 || move.right !== 0;
 
-    const moveYaw = this.yaw;
+    // Calculate bulletproof world vectors directly from camera
+    const camForward = this.camera.getDirection(new BABYLON.Vector3(0, 0, 1));
+    camForward.y = 0; camForward.normalize();
+    const camRight = this.camera.getDirection(new BABYLON.Vector3(1, 0, 0));
+    camRight.y = 0; camRight.normalize();
+
+    let dirX = camForward.x * move.forward + camRight.x * move.right;
+    let dirZ = camForward.z * move.forward + camRight.z * move.right;
+
+    if (isMoving) {
+      const len = Math.sqrt(dirX * dirX + dirZ * dirZ);
+      dirX /= len;
+      dirZ /= len;
+    }
 
     // Slide initiation
     if (this.input.isKeyDown('ShiftLeft') && this.grounded && isMoving && !this.sliding && this.slideCooldown <= 0) {
       this.sliding = true;
       this.slideTimer = this.slideDuration;
       this.slideCooldown = 1.0;
-      const moveAngle = Math.atan2(move.right, move.forward) + moveYaw;
-      this.slideDir = { x: Math.sin(moveAngle), z: Math.cos(moveAngle) };
+      this.slideDir = { x: dirX, z: dirZ };
     }
 
     if (!this.sliding) {
       if (isMoving) {
-        const moveAngle = Math.atan2(move.right, move.forward) + moveYaw;
-        const targetVx = Math.sin(moveAngle) * this.maxMoveSpeed;
-        const targetVz = Math.cos(moveAngle) * this.maxMoveSpeed;
+        const targetVx = dirX * this.maxMoveSpeed;
+        const targetVz = dirZ * this.maxMoveSpeed;
         const t = 1 - Math.exp(-this.acceleration * dt);
         this.moveVelocity.x += (targetVx - this.moveVelocity.x) * t;
         this.moveVelocity.z += (targetVz - this.moveVelocity.z) * t;
