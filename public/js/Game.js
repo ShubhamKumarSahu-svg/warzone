@@ -81,13 +81,8 @@ class Game {
     // Shared materials (initialized after scene)
     this.sharedMaterials = null;
 
-    // Bullet trail pool
-    this.trailPool = [];
-    this.trailPoolSize = 20;
-
-    // [FIX 10] Floating damage text pool
-    this.dmgPool = [];
-    this.dmgPoolSize = 10;
+    // FX Manager
+    this.fxManager = null;
 
     // Perf HUD
     this.perfEl = null;
@@ -151,9 +146,9 @@ class Game {
       this.graphics.apply(quality);
 
       // Initialize shared systems
-      this.initSharedMaterials();
-      this.initTrailPool();
-      this.initDmgPool(); // [FIX 10]
+      this.initSharedMaterials(); // [FIX 10]
+      this.playerController = new PlayerController(this);
+      this.fxManager = new VisualFXManager(this.scene, this.camera);
 
       // Preload 3D assets
       this.assetLoader = new AssetLoader(this.scene);
@@ -559,7 +554,7 @@ class Game {
     this.handleCombatInput(dt);
     this.weapons.updateRecoil(dt);
     this.updateReloadAnim(dt);
-    this.updateTrails(dt);
+    this.fxManager.update(dt);
     this.interpolateOtherPlayers(dt);
     this.updatePerfHUD(dt);
     this.scene.render();
@@ -592,7 +587,11 @@ class Game {
           if (this.weapons.canShoot()) {
             this.weapons.shoot();
             this.network.sendShoot();
-            this.showMuzzleFlash();
+            this.fxManager.showMuzzleFlash();
+            
+            const aimDir = this.camera.getForwardRay().direction;
+            this.fxManager.createBulletTrail(this.camera.position, aimDir);
+            
             this.ui.updateCrosshairSpread(true);
           } else if (this.weapons.ammo <= 0 && !this.weapons.reloading) {
             this.network.sendReload();
@@ -633,11 +632,9 @@ class Game {
   }
 
   showMuzzleFlash() {
-    if (!this.muzzleFlash) return;
-    this.muzzleFlash.material.alpha = 1;
+    this.fxManager.showMuzzleFlash();
 
-    // [FIX 13] Weapon kick handled only in the reload anim system; removed the
-    // competing setTimeout that raced against updateReloadAnim
+    // Weapon kick
     if (this.weaponRoot && !this.isReloadAnimating) {
       this.weaponRoot.position.z = this.weaponRestPos.z - 0.06;
       this._kickTimer = setTimeout(() => {
@@ -646,35 +643,6 @@ class Game {
         }
       }, 60);
     }
-
-    setTimeout(() => { if (this.muzzleFlash) this.muzzleFlash.material.alpha = 0; }, 40);
-    this.createBulletTrail();
-  }
-
-  createBulletTrail() {
-    const slot = this.trailPool.find(t => !t.active);
-    if (!slot) return;
-
-    const cam = this.camera;
-    const forward = cam.getForwardRay().direction;
-    const start = cam.position.clone();
-    start.addInPlace(forward.scale(1.0));
-    const end = start.add(forward.scale(80));
-
-    // [FIX 9] Correctly update the updatable line mesh — don't pass 'instance' to CreateLines
-    const updatedMesh = BABYLON.MeshBuilder.CreateLines('trail_upd', {
-      points: [start, end],
-      updatable: false
-    }, this.scene);
-
-    // Swap the pooled mesh for the new one then dispose the old
-    slot.mesh.dispose();
-    slot.mesh = updatedMesh;
-    slot.mesh.color = new BABYLON.Color3(1, 0.85, 0.4);
-    slot.mesh.alpha = 0.6;
-    slot.mesh.setEnabled(true);
-    slot.active = true;
-    slot.life = 0;
   }
 
   startReloadAnim() {
@@ -804,87 +772,10 @@ class Game {
     this.sharedMaterials.team[2].diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.2);
   }
 
-  // ─── Bullet Trail Pool ──────────────────────────────
-  initTrailPool() {
-    for (let i = 0; i < this.trailPoolSize; i++) {
-      const trail = BABYLON.MeshBuilder.CreateLines('trail_' + i, {
-        points: [BABYLON.Vector3.Zero(), BABYLON.Vector3.One()],
-        updatable: false
-      }, this.scene);
-      trail.color = new BABYLON.Color3(1, 0.85, 0.4);
-      trail.setEnabled(false);
-      this.trailPool.push({ mesh: trail, active: false, life: 0 });
-    }
-  }
 
-  updateTrails(dt) {
-    for (const slot of this.trailPool) {
-      if (!slot.active) continue;
-      slot.life += dt;
-      slot.mesh.alpha = Math.max(0, 0.6 - slot.life / 0.2);
-      if (slot.life >= 0.2) {
-        slot.mesh.setEnabled(false);
-        slot.active = false;
-      }
-    }
-  }
-
-  // ─── Floating Damage Pool [FIX 10] ─────────────────
-  initDmgPool() {
-    for (let i = 0; i < this.dmgPoolSize; i++) {
-      const plane = BABYLON.MeshBuilder.CreatePlane('dmg_' + i, { width: 1.5, height: 0.5 }, this.scene);
-      plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-      plane.setEnabled(false);
-
-      const tex = new BABYLON.DynamicTexture('dmgTex_' + i, { width: 256, height: 64 }, this.scene);
-      const mat = new BABYLON.StandardMaterial('dmgMat_' + i, this.scene);
-      mat.diffuseTexture = tex;
-      mat.emissiveTexture = tex;
-      mat.disableLighting = true;
-      mat.hasAlpha = true;
-      mat.useAlphaFromDiffuseTexture = true;
-      plane.material = mat;
-
-      this.dmgPool.push({ plane, tex, mat, active: false, life: 0 });
-    }
-  }
 
   showFloatingDamage(position, damage, isHeadshot) {
-    const slot = this.dmgPool.find(s => !s.active);
-    if (!slot) return; // pool exhausted — skip rather than leak
-
-    slot.plane.position = position.clone();
-    slot.plane.position.y += 2.0;
-    slot.plane.position.x += (Math.random() - 0.5) * 0.5;
-    slot.plane.position.z += (Math.random() - 0.5) * 0.5;
-
-    const ctx = slot.tex.getContext();
-    ctx.clearRect(0, 0, 256, 64);
-    ctx.fillStyle = isHeadshot ? '#ff4444' : '#ffaa00';
-    ctx.font = 'bold 48px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(Math.round(damage).toString(), 128, 48);
-    slot.tex.update();
-
-    slot.mat.alpha = 1;
-    slot.plane.setEnabled(true);
-    slot.active = true;
-    slot.life = 1.0;
-  }
-
-  // Called each frame to animate active damage labels
-  updateDmgPool(dt) {
-    for (const slot of this.dmgPool) {
-      if (!slot.active) continue;
-      slot.life -= dt;
-      if (slot.life <= 0) {
-        slot.plane.setEnabled(false);
-        slot.active = false;
-      } else {
-        slot.plane.position.y += 0.02;
-        slot.mat.alpha = slot.life;
-      }
-    }
+    this.fxManager.showFloatingDamage(position, damage, isHeadshot);
   }
 
   // ─── Other Player Interpolation ────────────────────
