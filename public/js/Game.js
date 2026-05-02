@@ -555,121 +555,30 @@ class Game {
       return;
     }
 
-    this.handleInput(dt);
+    this.playerController.update(dt);
+    this.handleCombatInput(dt);
     this.weapons.updateRecoil(dt);
     this.updateReloadAnim(dt);
-    this.updateSlide(dt);
     this.updateTrails(dt);
     this.interpolateOtherPlayers(dt);
     this.updatePerfHUD(dt);
     this.scene.render();
+
+    // Send position to server using the controller's state
+    const pState = this.playerController.getState();
+    this.network.sendInput({
+      position: pState.position,
+      rotation: pState.rotation,
+      moving: pState.moving,
+      crouching: pState.crouching,
+      grounded: pState.grounded,
+      jumping: pState.jumping,
+      seq: this.input.consumeInputSeq()
+    });
   }
 
-  handleInput(dt) {
+  handleCombatInput(dt) {
     if (!this.alive || !this.input.locked) return;
-
-    // Mouse look
-    const mouseDelta = this.input.getMouseDelta();
-    this.yaw += mouseDelta.dx;
-    this.pitch += mouseDelta.dy;
-    this.pitch = Math.max(-Math.PI / 2.1, Math.min(Math.PI / 2.1, this.pitch));
-
-    this.pitch -= this.weapons.recoilOffset.y;
-    this.yaw += this.weapons.recoilOffset.x;
-
-    this.camera.rotation.y = this.yaw;
-    this.camera.rotation.x = this.pitch;
-
-    // Movement
-    const move = this.input.getMovement();
-    const isMoving = move.forward !== 0 || move.right !== 0;
-
-    // Calculate bulletproof world vectors directly from camera
-    const camForward = this.camera.getDirection(new BABYLON.Vector3(0, 0, 1));
-    camForward.y = 0; camForward.normalize();
-    const camRight = this.camera.getDirection(new BABYLON.Vector3(1, 0, 0));
-    camRight.y = 0; camRight.normalize();
-
-    let dirX = camForward.x * move.forward + camRight.x * move.right;
-    let dirZ = camForward.z * move.forward + camRight.z * move.right;
-
-    if (isMoving) {
-      const len = Math.sqrt(dirX * dirX + dirZ * dirZ);
-      dirX /= len;
-      dirZ /= len;
-    }
-
-    // Slide initiation
-    if (this.input.isKeyDown('ShiftLeft') && this.grounded && isMoving && !this.sliding && this.slideCooldown <= 0) {
-      this.sliding = true;
-      this.slideTimer = this.slideDuration;
-      this.slideCooldown = 1.0;
-      this.slideDir = { x: dirX, z: dirZ };
-    }
-
-    if (!this.sliding) {
-      if (isMoving) {
-        const targetVx = dirX * this.maxMoveSpeed;
-        const targetVz = dirZ * this.maxMoveSpeed;
-        const t = 1 - Math.exp(-this.acceleration * dt);
-        this.moveVelocity.x += (targetVx - this.moveVelocity.x) * t;
-        this.moveVelocity.z += (targetVz - this.moveVelocity.z) * t;
-      } else {
-        const t = 1 - Math.exp(-this.deceleration * dt);
-        this.moveVelocity.x *= (1 - t);
-        this.moveVelocity.z *= (1 - t);
-      }
-    }
-
-    const speedMult = this.crouching ? 0.5 : 1.0;
-
-    // Jump
-    if (this.input.isKeyDown('Space') && this.grounded) {
-      this.velocity.y = this.jumpForce;
-      this.grounded = false;
-    }
-
-    // Gravity
-    this.velocity.y += this.gravity * dt;
-
-    // Movement with AABB collision
-    let nextX = this.camera.position.x + this.moveVelocity.x * speedMult * dt;
-    let nextZ = this.camera.position.z + this.moveVelocity.z * speedMult * dt;
-    let canMoveX = true;
-    let canMoveZ = true;
-
-    if (this.mapData && this.mapData.obstacles) {
-      const padding = 0.5;
-      for (const obs of this.mapData.obstacles) {
-        if (nextX > obs.min.x - padding && nextX < obs.max.x + padding &&
-          this.camera.position.z > obs.min.z - padding && this.camera.position.z < obs.max.z + padding) {
-          canMoveX = false;
-        }
-        if (this.camera.position.x > obs.min.x - padding && this.camera.position.x < obs.max.x + padding &&
-          nextZ > obs.min.z - padding && nextZ < obs.max.z + padding) {
-          canMoveZ = false;
-        }
-      }
-    }
-
-    if (canMoveX) this.camera.position.x = nextX;
-    if (canMoveZ) this.camera.position.z = nextZ;
-    this.camera.position.y += this.velocity.y * dt;
-
-    if (this.camera.position.y <= this.playerHeight) {
-      this.camera.position.y = this.playerHeight;
-      this.velocity.y = 0;
-      this.grounded = true;
-    }
-
-    // Crouch
-    this.crouching = this.sliding || this.input.isKeyDown('KeyC') || this.input.isKeyDown('ControlLeft');
-
-    // [FIX 2] Clamp to map bounds — only once
-    const halfX = (this.mapData?.size?.x || 60) / 2 - 1;
-    const halfZ = (this.mapData?.size?.z || 60) / 2 - 1;
-    this.camera.position.x = Math.max(-halfX, Math.min(halfX, this.camera.position.x));
-    this.camera.position.z = Math.max(-halfZ, Math.min(halfZ, this.camera.position.z));
 
     // Prep-phase guard
     const isPrep = this.currentPhase === 'preparation' || this.currentPhase === 'debrief';
@@ -721,17 +630,6 @@ class Game {
 
     if (this.input.consumeKey('Escape')) this.togglePause();
     if (this.input.consumeKey('KeyT')) this.openChat();
-
-    // Send position to server
-    this.network.sendInput({
-      position: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
-      rotation: { x: this.pitch, y: moveYaw },
-      moving: isMoving,
-      crouching: this.crouching,
-      grounded: this.grounded,
-      jumping: !this.grounded,
-      seq: this.input.consumeInputSeq()
-    });
   }
 
   showMuzzleFlash() {
@@ -802,6 +700,14 @@ class Game {
     } else {
       this.weaponRoot.position = this.weaponRestPos.clone();
       this.weaponRoot.rotation.x = 0;
+
+      // Apply rotation for weapon model (use player controller pitch/yaw)
+      const pState = this.playerController ? this.playerController.getState() : { rotation: {x:0,y:0} };
+      this.weaponRoot.rotation.x = -pState.rotation.x;
+    
+      // Weapon sway
+      if (!this.weapons.aiming && pState.moving) { /* sway */ }
+      
       this.isReloadAnimating = false;
     }
   }
