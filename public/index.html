@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Browser-based multiplayer FPS game with real-time combat, multiple game modes, and progression system">
+  <title>WARZONE ONLINE | Multiplayer FPS</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- Babylon.js CDN -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════
+       AUTH SCREEN
+       ═══════════════════════════════════════════════════════ -->
+  <div id="auth-screen" class="screen active">
+    <div class="auth-bg"></div>
+    <div class="auth-container">
+      <div class="auth-logo">
+        <div class="logo-icon">⚔</div>
+        <h1 class="logo-title">WARZONE</h1>
+        <p class="logo-subtitle">ONLINE COMBAT</p>
+      </div>
+
+      <div class="auth-card" id="auth-card">
+        <div class="auth-tabs">
+          <button class="auth-tab active" id="btn-login-tab" onclick="showAuthTab('login')">LOGIN</button>
+          <button class="auth-tab" id="btn-signup-tab" onclick="showAuthTab('signup')">SIGN UP</button>
+        </div>
+
+        <form id="login-form" class="auth-form active" onsubmit="handleLogin(event)">
+          <div class="input-group">
+            <label for="login-username">CALLSIGN</label>
+            <input type="text" id="login-username" placeholder="Enter username" required autocomplete="username">
+          </div>
+          <div class="input-group">
+            <label for="login-password">PASSWORD</label>
+            <input type="password" id="login-password" placeholder="Enter password" required autocomplete="current-password">
+          </div>
+          <button type="submit" class="btn-primary" id="btn-login">DEPLOY</button>
+          <p class="auth-error" id="login-error"></p>
+        </form>
+
+        <form id="signup-form" class="auth-form" onsubmit="handleSignup(event)">
+          <div class="input-group">
+            <label for="signup-username">CALLSIGN</label>
+            <input type="text" id="signup-username" placeholder="Choose username (3-20 chars)" required minlength="3" maxlength="20" autocomplete="username">
+          </div>
+          <div class="input-group">
+            <label for="signup-password">PASSWORD</label>
+            <input type="password" id="signup-password" placeholder="Choose password (4+ chars)" required minlength="4" autocomplete="new-password">
+          </div>
+          <button type="submit" class="btn-primary" id="btn-signup">ENLIST</button>
+          <p class="auth-error" id="signup-error"></p>
+        </form>
+      </div>
+
+      <p class="auth-footer">v1.0 | BROWSER FPS</p>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       LOBBY SCREEN
+       ═══════════════════════════════════════════════════════ -->
+  <div id="lobby-screen" class="screen">
+    <div class="lobby-bg"></div>
+
+    <div class="lobby-header">
+      <div class="lobby-branding">
+        <span class="lobby-logo">⚔ WARZONE</span>
+      </div>
+      <div class="lobby-user-info" id="lobby-user-info">
+        <div class="user-level" id="user-level-badge">LV 1</div>
+        <span class="user-name" id="lobby-username">Player</span>
+        <div class="user-xp-bar">
+          <div class="xp-fill" id="xp-fill" style="width: 0%"></div>
+        </div>
+        <button class="btn-icon" onclick="handleLogout()" title="Logout">⏻</button>
+      </div>
+    </div>
+
+    <div class="lobby-content">
+      <div class="lobby-left">
+        <h2 class="section-title">ARMORY</h2>
+        <div class="loadout-panel" id="loadout-panel">
+          <div class="loadout-slot" id="primary-slot">
+            <span class="slot-label">PRIMARY</span>
+            <select id="primary-select" class="weapon-select" onchange="updateLoadout()"></select>
+          </div>
+          <div class="loadout-slot" id="secondary-slot">
+            <span class="slot-label">SECONDARY</span>
+            <select id="secondary-select" class="weapon-select" onchange="updateLoadout()"></select>
+          </div>
+        </div>
+
+        <h2 class="section-title" style="margin-top:20px;">SETTINGS</h2>
+        <div class="settings-panel">
+          <div class="setting-row">
+            <label>Graphics Quality</label>
+            <select id="graphics-quality" class="weapon-select" onchange="updateGraphicsQuality()">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Mouse Sensitivity</label>
+            <input type="range" id="sensitivity-slider" min="1" max="20" value="5" class="slider">
+            <span id="sensitivity-value">5</span>
+          </div>
+          <div class="setting-row">
+            <label>Master Volume</label>
+            <input type="range" id="volume-slider" min="0" max="100" value="50" class="slider">
+            <span id="volume-value">50</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="lobby-center">
+        <h2 class="section-title">BATTLE ROOMS</h2>
+        <div class="rooms-list" id="rooms-list">
+          <!-- Populated dynamically -->
+        </div>
+
+        <div class="create-room-panel">
+          <h3>CREATE ROOM</h3>
+          <div class="create-room-form">
+            <input type="text" id="room-name-input" placeholder="Room Name" maxlength="30">
+            <select id="room-mode-select" class="weapon-select">
+              <option value="tdm">Team Deathmatch</option>
+              <option value="ffa">Free For All</option>
+              <option value="snd">Search & Destroy</option>
+              <option value="domination">Domination</option>
+            </select>
+            <div class="create-room-row">
+              <label>Bots: <span id="bot-count-val">2</span></label>
+              <input type="range" id="bot-count" min="0" max="8" value="2" class="slider" oninput="document.getElementById('bot-count-val').textContent=this.value">
+            </div>
+            <button class="btn-primary" onclick="createRoom()">CREATE & JOIN</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="lobby-right">
+        <h2 class="section-title">INTEL</h2>
+        <div class="stats-panel" id="stats-panel">
+          <div class="stat-item">
+            <span class="stat-label">K/D Ratio</span>
+            <span class="stat-value" id="stat-kd">0.00</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Total Kills</span>
+            <span class="stat-value" id="stat-kills">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Matches Won</span>
+            <span class="stat-value" id="stat-wins">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Matches Played</span>
+            <span class="stat-value" id="stat-matches">0</span>
+          </div>
+        </div>
+
+        <h2 class="section-title" style="margin-top:20px;">LEADERBOARD</h2>
+        <div class="leaderboard-panel" id="leaderboard-panel">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       GAME SCREEN
+       ═══════════════════════════════════════════════════════ -->
+  <div id="game-screen" class="screen">
+    <canvas id="renderCanvas"></canvas>
+
+    <!-- HUD Overlay -->
+    <div id="game-hud" class="game-hud">
+      <!-- Crosshair -->
+      <div id="crosshair" class="crosshair">
+        <div class="cross-line cross-top"></div>
+        <div class="cross-line cross-bottom"></div>
+        <div class="cross-line cross-left"></div>
+        <div class="cross-line cross-right"></div>
+        <div class="cross-dot"></div>
+      </div>
+
+      <!-- Health Bar -->
+      <div class="hud-bottom-left">
+        <div class="health-display">
+          <div class="health-icon">+</div>
+          <div class="health-bar-container">
+            <div class="health-bar-fill" id="health-bar"></div>
+          </div>
+          <span class="health-value" id="health-value">100</span>
+        </div>
+      </div>
+
+      <!-- Ammo Display -->
+      <div class="hud-bottom-right">
+        <div class="ammo-display">
+          <span class="ammo-current" id="ammo-current">30</span>
+          <span class="ammo-separator">/</span>
+          <span class="ammo-reserve" id="ammo-reserve">90</span>
+        </div>
+        <div class="weapon-name" id="weapon-name">M416</div>
+      </div>
+
+      <!-- Kill Feed -->
+      <div class="kill-feed" id="kill-feed"></div>
+
+      <!-- Score / Timer -->
+      <div class="hud-top-center">
+        <div class="match-timer" id="match-timer">10:00</div>
+        <div class="match-score" id="match-score"></div>
+      </div>
+
+      <!-- Minimap placeholder -->
+      <div class="hud-top-right">
+        <div class="minimap" id="minimap">
+          <canvas id="minimap-canvas" width="160" height="160"></canvas>
+        </div>
+      </div>
+
+      <!-- Hit Marker -->
+      <div id="hit-marker" class="hit-marker">✕</div>
+
+      <!-- Damage Direction Indicator -->
+      <div id="damage-indicator" class="damage-indicator"></div>
+
+      <!-- Reload Indicator -->
+      <div id="reload-indicator" class="reload-indicator">RELOADING...</div>
+
+      <!-- Death Screen -->
+      <div id="death-screen" class="death-screen">
+        <h2>ELIMINATED</h2>
+        <p>Killed by <span id="killed-by">Enemy</span></p>
+        <p class="respawn-timer">Respawning in <span id="respawn-countdown">3</span>s</p>
+      </div>
+
+      <!-- Scoreboard (TAB) -->
+      <div id="scoreboard-overlay" class="scoreboard-overlay">
+        <div class="scoreboard-content">
+          <h2 id="scoreboard-title">SCOREBOARD</h2>
+          <div class="scoreboard-teams" id="scoreboard-teams"></div>
+          <table class="scoreboard-table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>K</th>
+                <th>D</th>
+                <th>A</th>
+                <th>Score</th>
+              </tr>
+            </thead>
+            <tbody id="scoreboard-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Game Over Overlay -->
+      <div id="game-over-overlay" class="game-over-overlay">
+        <div class="game-over-content">
+          <h1 id="game-over-result">VICTORY</h1>
+          <div class="game-over-stats" id="game-over-stats"></div>
+          <button class="btn-primary" onclick="leaveGame()">RETURN TO LOBBY</button>
+        </div>
+      </div>
+
+      <!-- Pause Menu -->
+      <div id="pause-menu" class="pause-menu">
+        <div class="pause-content">
+          <h2>PAUSED</h2>
+          <button class="btn-primary" onclick="resumeGame()">RESUME</button>
+          <button class="btn-secondary" onclick="leaveGame()">LEAVE MATCH</button>
+        </div>
+      </div>
+
+      <!-- Chat -->
+      <div class="chat-container" id="chat-container">
+        <div class="chat-messages" id="chat-messages"></div>
+        <input type="text" id="chat-input" class="chat-input" placeholder="Press T to chat..." maxlength="200">
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       LOADING SCREEN
+       ═══════════════════════════════════════════════════════ -->
+  <div id="loading-screen" class="screen loading-screen">
+    <div class="loading-content">
+      <h2>DEPLOYING TO BATTLEFIELD</h2>
+      <div class="loading-bar">
+        <div class="loading-fill" id="loading-fill"></div>
+      </div>
+      <p class="loading-tip" id="loading-tip">Tip: Use cover to avoid enemy fire</p>
+    </div>
+  </div>
+
+  <!-- Scripts (order matters) -->
+  <script src="js/NetworkManager.js"></script>
+  <script src="js/InputManager.js"></script>
+  <script src="js/WeaponSystem.js"></script>
+  <script src="js/MapManager.js"></script>
+  <script src="js/GraphicsSettings.js"></script>
+  <script src="js/UIManager.js"></script>
+  <script src="js/Game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
