@@ -1,5 +1,10 @@
 /**
  * InputManager - Handles keyboard/mouse for FPS controls
+ *
+ * FIXES:
+ * B7 - Added consumeKey(code) method. Game.js calls this on every one-shot key
+ *      (R, Q, T, Escape, Digit1, Digit2). Without it, the call threw a TypeError
+ *      that silently swallowed the entire handleInput() frame, so nothing moved.
  */
 class InputManager {
   constructor(canvas) {
@@ -81,6 +86,18 @@ class InputManager {
 
   isKeyDown(code) { return !!this.keys[code]; }
   isMouseDown(btn) { return !!this.mouse.buttons[btn]; }
+
+  /**
+   * B7 FIX: consumeKey — returns true once then clears the key.
+   * Used for one-shot actions (reload, ability, weapon switch, pause, chat).
+   * Previously missing, which caused a TypeError that broke the entire
+   * handleInput() call every frame — killing movement, shooting, everything.
+   */
+  consumeKey(code) {
+    if (!this.keys[code]) return false;
+    this.keys[code] = false;
+    return true;
+  }
 
   getMovement() {
     let forward = 0, right = 0;

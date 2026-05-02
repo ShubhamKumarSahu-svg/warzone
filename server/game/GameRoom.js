@@ -101,6 +101,80 @@ const MAPS = {
       { min: { x: -28, z: -28 }, max: { x: -20, z: -20 }, height: 8 },
       { min: { x: 20, z: 20 }, max: { x: 28, z: 28 }, height: 8 }
     ]
+  },
+  plaza: {
+    id: 'plaza',
+    name: 'City Plaza',
+    theme: 'downtown',
+    size: { x: 80, z: 80 },
+    spawnPoints: {
+      ffa: [
+        { x: -35, y: 1.8, z: -35 }, { x: 35, y: 1.8, z: -35 },
+        { x: -35, y: 1.8, z: 35 },  { x: 35, y: 1.8, z: 35 },
+        { x: 0, y: 1.8, z: 35 },    { x: 0, y: 1.8, z: -35 },
+        { x: -35, y: 1.8, z: 0 },   { x: 35, y: 1.8, z: 0 }
+      ],
+      team: [
+        [{ x: -30, y: 1.8, z: -30 }, { x: -35, y: 1.8, z: -25 }, { x: -25, y: 1.8, z: -35 }, { x: -30, y: 1.8, z: -25 }, { x: -25, y: 1.8, z: -30 }, { x: -35, y: 1.8, z: -35 }],
+        [{ x: 30, y: 1.8, z: 30 }, { x: 35, y: 1.8, z: 25 }, { x: 25, y: 1.8, z: 35 }, { x: 30, y: 1.8, z: 25 }, { x: 25, y: 1.8, z: 30 }, { x: 35, y: 1.8, z: 35 }]
+      ]
+    },
+    obstacles: [
+      // Central monument / cover
+      { type: 'watertower', min: { x: -3, z: -3 }, max: { x: 3, z: 3 }, height: 10 },
+      // Four outer corners (Tall buildings)
+      { type: 'building_H', min: { x: -38, z: -38 }, max: { x: -22, z: -22 }, height: 20 },
+      { type: 'building_H', min: { x: 22, z: -38 }, max: { x: 38, z: -22 }, height: 20 },
+      { type: 'building_H', min: { x: -38, z: 22 }, max: { x: -22, z: 38 }, height: 20 },
+      { type: 'building_H', min: { x: 22, z: 22 }, max: { x: 38, z: 38 }, height: 20 },
+      // Scattered cover (benches, dumpsters, cars)
+      { type: 'dumpster', min: { x: -12, z: -2 }, max: { x: -8, z: 2 }, height: 2 },
+      { type: 'dumpster', min: { x: 8, z: -2 }, max: { x: 12, z: 2 }, height: 2 },
+      { type: 'car_hatchback', min: { x: -2, z: 15 }, max: { x: 2, z: 20 }, height: 3 },
+      { type: 'car_stationwagon', min: { x: -2, z: -20 }, max: { x: 2, z: -15 }, height: 3 },
+      { type: 'bench', min: { x: -15, z: -15 }, max: { x: -13, z: -11 }, height: 1.5 },
+      { type: 'bench', min: { x: 13, z: 11 }, max: { x: 15, z: 15 }, height: 1.5 },
+      { type: 'bush', min: { x: 15, z: -15 }, max: { x: 18, z: -12 }, height: 2 },
+      { type: 'bush', min: { x: -18, z: 12 }, max: { x: -15, z: 15 }, height: 2 }
+    ]
+  },
+  suburbs: {
+    id: 'suburbs',
+    name: 'Suburban Street',
+    theme: 'downtown',
+    size: { x: 100, z: 40 },
+    spawnPoints: {
+      ffa: [
+        { x: -45, y: 1.8, z: 0 }, { x: 45, y: 1.8, z: 0 },
+        { x: -25, y: 1.8, z: 15 }, { x: 25, y: 1.8, z: 15 },
+        { x: -25, y: 1.8, z: -15 }, { x: 25, y: 1.8, z: -15 },
+        { x: 0, y: 1.8, z: 15 }, { x: 0, y: 1.8, z: -15 }
+      ],
+      team: [
+        [{ x: -45, y: 1.8, z: 0 }, { x: -40, y: 1.8, z: 5 }, { x: -40, y: 1.8, z: -5 }, { x: -45, y: 1.8, z: 5 }, { x: -45, y: 1.8, z: -5 }, { x: -35, y: 1.8, z: 0 }],
+        [{ x: 45, y: 1.8, z: 0 }, { x: 40, y: 1.8, z: 5 }, { x: 40, y: 1.8, z: -5 }, { x: 45, y: 1.8, z: 5 }, { x: 45, y: 1.8, z: -5 }, { x: 35, y: 1.8, z: 0 }]
+      ]
+    },
+    obstacles: [
+      // Top row of houses
+      { type: 'building_B', min: { x: -30, z: 8 }, max: { x: -20, z: 18 }, height: 8 },
+      { type: 'building_C', min: { x: -10, z: 8 }, max: { x: 0, z: 18 }, height: 8 },
+      { type: 'building_A', min: { x: 10, z: 8 }, max: { x: 20, z: 18 }, height: 8 },
+      { type: 'building_E', min: { x: 30, z: 8 }, max: { x: 40, z: 18 }, height: 8 },
+      // Bottom row of houses
+      { type: 'building_F', min: { x: -30, z: -18 }, max: { x: -20, z: -8 }, height: 8 },
+      { type: 'building_A', min: { x: -10, z: -18 }, max: { x: 0, z: -8 }, height: 8 },
+      { type: 'building_D', min: { x: 10, z: -18 }, max: { x: 20, z: -8 }, height: 8 },
+      { type: 'building_C', min: { x: 30, z: -18 }, max: { x: 40, z: -8 }, height: 8 },
+      // Cars on the street (Z=0)
+      { type: 'car_sedan', min: { x: -15, z: -2 }, max: { x: -11, z: 2 }, height: 3 },
+      { type: 'car_taxi', min: { x: 5, z: -2 }, max: { x: 9, z: 2 }, height: 3 },
+      { type: 'car_police', min: { x: 25, z: -2 }, max: { x: 29, z: 2 }, height: 3 },
+      // Streetlights and hydrants
+      { type: 'streetlight', min: { x: -20, z: 5 }, max: { x: -19, z: 6 }, height: 5 },
+      { type: 'streetlight', min: { x: 20, z: -6 }, max: { x: 21, z: -5 }, height: 5 },
+      { type: 'firehydrant', min: { x: 0, z: 6 }, max: { x: 1, z: 7 }, height: 1.5 }
+    ]
   }
 };
 

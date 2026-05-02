@@ -42,29 +42,33 @@ class MapManager {
         const cx = (obs.min.x + obs.max.x) / 2;
         const cz = (obs.min.z + obs.max.z) / 2;
         
-        let buildingType = 'building_A';
-        if (obs.height >= 15) buildingType = 'building_G'; // Tall corner
-        else if (obs.height >= 12) buildingType = 'building_D'; // A-site
-        else if (obs.height >= 10) buildingType = 'building_C';
-        else if (obs.height >= 8) buildingType = 'building_B';
-        else if (obs.height >= 6) buildingType = 'building_E';
-        
-        // If it's the center vehicle cover
-        if (obs.height < 5) {
+        let buildingType = obs.type;
+        if (!buildingType) {
+          if (obs.height >= 15) buildingType = 'building_G'; // Tall corner
+          else if (obs.height >= 12) buildingType = 'building_D'; // A-site
+          else if (obs.height >= 10) buildingType = 'building_C';
+          else if (obs.height >= 8) buildingType = 'building_B';
+          else if (obs.height >= 6) buildingType = 'building_E';
+          else buildingType = null; // No default building for small heights unless specified
+        }
+
+        if (buildingType) {
+          this.assetLoader.placeMapPiece(buildingType, new BABYLON.Vector3(cx, 0, cz)).then(mesh => {
+            if (mesh) {
+              // Rotate randomly unless it's a specific type of prop
+              if (!buildingType.includes('car_') && !buildingType.includes('watertower')) {
+                mesh.rotation.y = (Math.PI / 2) * (i % 4);
+              }
+              this.addShadowCaster(mesh);
+            }
+          });
+        } else if (obs.height < 5 && !obs.type) {
+          // Fallback legacy behavior for gridlock center
           this.assetLoader.placeMapPiece('car_police', new BABYLON.Vector3(cx - 2, 0, cz)).then(car => {
             if (car) { car.rotation.y = Math.PI / 4; this.addShadowCaster(car); }
           });
           this.assetLoader.placeMapPiece('car_taxi', new BABYLON.Vector3(cx + 2, 0, cz)).then(taxi => {
             if (taxi) { taxi.rotation.y = -Math.PI / 6; this.addShadowCaster(taxi); }
-          });
-        } else {
-          // It's a building
-          this.assetLoader.placeMapPiece(buildingType, new BABYLON.Vector3(cx, 0, cz)).then(mesh => {
-            if (mesh) {
-              // Rotate some buildings
-              mesh.rotation.y = (Math.PI / 2) * (i % 4);
-              this.addShadowCaster(mesh);
-            }
           });
         }
 
@@ -171,16 +175,20 @@ class MapManager {
 
       // Place City Builder asset if AssetLoader is available
       if (this.assetLoader) {
-        let buildingType = 'building_A';
-        if (h >= 15) buildingType = 'building_G';
-        else if (h >= 10) buildingType = 'building_D';
-        else if (h >= 8) buildingType = 'building_C';
-        else if (h >= 6) buildingType = 'building_B';
-        else buildingType = 'building_E';
+        let buildingType = obs.type;
+        if (!buildingType) {
+          if (h >= 15) buildingType = 'building_G';
+          else if (h >= 10) buildingType = 'building_D';
+          else if (h >= 8) buildingType = 'building_C';
+          else if (h >= 6) buildingType = 'building_B';
+          else buildingType = 'building_E';
+        }
 
         this.assetLoader.placeMapPiece(buildingType, new BABYLON.Vector3(cx, 0, cz)).then(mesh => {
           if (mesh) {
-            mesh.rotation.y = (Math.PI / 2) * (i % 4);
+            if (!buildingType.includes('car_') && !buildingType.includes('watertower')) {
+              mesh.rotation.y = (Math.PI / 2) * (i % 4);
+            }
             this.addShadowCaster(mesh);
           }
         });

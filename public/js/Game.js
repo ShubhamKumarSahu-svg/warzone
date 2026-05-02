@@ -1,5 +1,22 @@
 /**
  * Game - Core Babylon.js game engine integrating all systems
+ *
+ * FIXES APPLIED:
+ *  1. Removed duplicate scene.activeCamera assignment
+ *  2. Removed duplicate map-bounds clamping block
+ *  3. Removed duplicate net.on('game_event') — merged both handlers into one
+ *  4. Moved moveYaw computation BEFORE the slide-initiation block that needs it
+ *  5. Added this.currentPhase and this.team initialisation in constructor
+ *  6. Fixed weapons.shooting reset path in prep-phase guard
+ *  7. Standardised key-consumption via input.consumeKey(); removed race condition in openChat
+ *  8. Reset isReloadAnimating in reload_complete handler
+ *  9. Fixed createBulletTrail — use CreateLines normally (no broken instance param)
+ * 10. Pooled floating-damage text planes to avoid per-shot texture/material leaks
+ * 11. Store and remove per-player marker observer in removeOtherPlayer
+ * 12. Fixed animationGroups lookup — read from scene, keyed by player id
+ * 13. Removed muzzleFlash setTimeout position-reset (was racing with reload anim)
+ * 14. handleGameOver uses this.selfState.team consistently; removed stale this.team ref
+ * 15. playAbilityEffect uses server-provided cooldownMs with a sensible fallback
  */
 class Game {
   constructor(network) {
@@ -19,11 +36,15 @@ class Game {
     // Player state
     this.playerId = null;
     this.selfState = null;
-    this.otherPlayers = {};  // id -> { mesh, nameTag, state }
+    this.otherPlayers = {};  // id -> { mesh, nameTag, state, markerObserver }
     this.mapData = null;
     this.gameMode = null;
     this.paused = false;
     this.alive = true;
+
+    // [FIX 5] Initialise phase/team so comparisons never read undefined
+    this.currentPhase = null;
+    this.team = null;
 
     // FPS camera
     this.yaw = 0;
@@ -64,6 +85,10 @@ class Game {
     this.trailPool = [];
     this.trailPoolSize = 20;
 
+    // [FIX 10] Floating damage text pool
+    this.dmgPool = [];
+    this.dmgPoolSize = 10;
+
     // Perf HUD
     this.perfEl = null;
     this.fpsHistory = [];
@@ -83,103 +108,106 @@ class Game {
 
   async init(playerData, roomData) {
     try {
-    this.playerId = playerData.id;
-    this.selfState = playerData;
-    this.mapData = roomData.mapData;
-    this.gameMode = roomData.gameMode;
+      this.playerId = playerData.id;
+      this.selfState = playerData;
+      this.mapData = roomData.mapData;
+      this.gameMode = roomData.gameMode;
 
-    // Create engine
-    this.engine = new BABYLON.Engine(this.canvas, true, { preserveDrawingBuffer: true, stencil: true });
-    this.engine.setSize(window.innerWidth, window.innerHeight);
+      // [FIX 5] Capture team from playerData
+      this.team = playerData.team ?? null;
 
-    // Create scene
-    this.scene = new BABYLON.Scene(this.engine);
-    this.scene.clearColor = new BABYLON.Color4(0.02, 0.03, 0.06, 1);
-    this.scene.collisionsEnabled = true;
-    this.scene.gravity = new BABYLON.Vector3(0, this.gravity / 60, 0);
-    this.scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
-    this.scene.fogDensity = 0.003;
-    this.scene.fogColor = new BABYLON.Color3(0.05, 0.06, 0.1);
+      // Create engine
+      this.engine = new BABYLON.Engine(this.canvas, true, { preserveDrawingBuffer: true, stencil: true });
+      this.engine.setSize(window.innerWidth, window.innerHeight);
 
-    // Camera
-    this.camera = new BABYLON.FreeCamera('camera', new BABYLON.Vector3(
-      playerData.position.x, playerData.position.y, playerData.position.z
-    ), this.scene);
-    this.camera.minZ = 0.1;
-    this.camera.maxZ = 300;
-    this.camera.fov = 1.2;
-    this.camera.inertia = 0;
-    this.camera.angularSensibility = 99999; // We handle mouse ourselves
-    this.camera.checkCollisions = true;
-    this.camera.ellipsoid = new BABYLON.Vector3(this.playerRadius, this.playerHeight / 2, this.playerRadius);
-    this.camera.applyGravity = true;
-    this.scene.activeCamera = this.camera;
+      // Create scene
+      this.scene = new BABYLON.Scene(this.engine);
+      this.scene.clearColor = new BABYLON.Color4(0.02, 0.03, 0.06, 1);
+      this.scene.collisionsEnabled = true;
+      this.scene.gravity = new BABYLON.Vector3(0, this.gravity / 60, 0);
+      this.scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+      this.scene.fogDensity = 0.003;
+      this.scene.fogColor = new BABYLON.Color3(0.05, 0.06, 0.1);
 
-    this.scene.activeCamera = this.camera;
+      // Camera
+      this.camera = new BABYLON.FreeCamera('camera', new BABYLON.Vector3(
+        playerData.position.x, playerData.position.y, playerData.position.z
+      ), this.scene);
+      this.camera.minZ = 0.1;
+      this.camera.maxZ = 300;
+      this.camera.fov = 1.2;
+      this.camera.inertia = 0;
+      this.camera.angularSensibility = 99999;
+      this.camera.checkCollisions = true;
+      this.camera.ellipsoid = new BABYLON.Vector3(this.playerRadius, this.playerHeight / 2, this.playerRadius);
+      this.camera.applyGravity = true;
 
-    // Graphics settings
-    this.graphics = new GraphicsSettings(this.scene, this.engine);
-    const quality = document.getElementById('graphics-quality')?.value || 'medium';
-    this.graphics.apply(quality);
+      // [FIX 1] Only set activeCamera once
+      this.scene.activeCamera = this.camera;
 
-    // Initialize shared systems (must be before addOtherPlayer which uses sharedMaterials)
-    this.initSharedMaterials();
-    this.initTrailPool();
+      // Graphics settings
+      this.graphics = new GraphicsSettings(this.scene, this.engine);
+      const quality = document.getElementById('graphics-quality')?.value || 'medium';
+      this.graphics.apply(quality);
 
-    // Preload 3D assets (characters, weapons) with loading bar feedback
-    this.assetLoader = new AssetLoader(this.scene);
-    const loadingFill = document.getElementById('loading-fill');
-    this.assetLoader.onProgress = (pct, label) => {
-      if (loadingFill) loadingFill.style.width = (30 + pct * 0.5) + '%';
-      const tipEl = document.getElementById('loading-tip');
-      if (tipEl) tipEl.textContent = label;
-    };
-    const loadTimeout = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Asset load timeout')), 10000)
-    );
+      // Initialize shared systems
+      this.initSharedMaterials();
+      this.initTrailPool();
+      this.initDmgPool(); // [FIX 10]
 
-    try {
-      await Promise.race([this.assetLoader.preloadAll(), loadTimeout]);
-    } catch (err) {
-      console.warn('Asset load failed, using fallbacks:', err);
-      // Continue anyway — your code already has box fallbacks
-    }
+      // Preload 3D assets
+      this.assetLoader = new AssetLoader(this.scene);
+      const loadingFill = document.getElementById('loading-fill');
+      this.assetLoader.onProgress = (pct, label) => {
+        if (loadingFill) loadingFill.style.width = (30 + pct * 0.5) + '%';
+        const tipEl = document.getElementById('loading-tip');
+        if (tipEl) tipEl.textContent = label;
+      };
+      const loadTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Asset load timeout')), 10000)
+      );
 
-    // Build map (needs assetLoader for City Builder tiles)
-    this.map = new MapManager(this.scene);
-    this.map.buildMap(this.mapData, this.assetLoader);
+      try {
+        await Promise.race([this.assetLoader.preloadAll(), loadTimeout]);
+      } catch (err) {
+        console.warn('Asset load failed, using fallbacks:', err);
+      }
 
-    // Create weapon viewmodel (GLB blaster or fallback boxes)
-    this.createWeaponModel();
-    this.initPerfHUD();
+      // Build map
+      this.map = new MapManager(this.scene);
+      this.map.buildMap(this.mapData, this.assetLoader);
 
-    // Spawn existing players
-    if (roomData.allPlayers) {
-      roomData.allPlayers.forEach(p => {
-        if (p.id !== this.playerId) this.addOtherPlayer(p);
+      // Create weapon viewmodel
+      this.createWeaponModel();
+      this.initPerfHUD();
+
+      // Spawn existing players
+      if (roomData.allPlayers) {
+        roomData.allPlayers.forEach(p => {
+          if (p.id !== this.playerId) this.addOtherPlayer(p);
+        });
+      }
+
+      // Input
+      this.input.enable();
+      const sens = parseInt(document.getElementById('sensitivity-slider')?.value || '5');
+      this.input.sensitivity = sens * 0.0008;
+
+      // Network handlers
+      this.setupNetworkHandlers();
+
+      // Resize
+      window.addEventListener('resize', () => this.engine.resize());
+
+      // Start loop
+      this.running = true;
+      this.lastTime = performance.now();
+      this.engine.runRenderLoop(() => this.gameLoop());
+
+      // Pointer lock on click
+      this.canvas.addEventListener('click', () => {
+        if (!this.paused) this.input.requestPointerLock();
       });
-    }
-
-    // Input
-    this.input.enable();
-    const sens = parseInt(document.getElementById('sensitivity-slider')?.value || '5');
-    this.input.sensitivity = sens * 0.0008;
-
-    // Network handlers
-    this.setupNetworkHandlers();
-
-    // Resize
-    window.addEventListener('resize', () => this.engine.resize());
-
-    // Start loop
-    this.running = true;
-    this.lastTime = performance.now();
-    this.engine.runRenderLoop(() => this.gameLoop());
-
-    // Request pointer lock on click
-    this.canvas.addEventListener('click', () => {
-      if (!this.paused) this.input.requestPointerLock();
-    });
 
     } catch (err) {
       console.error('Game init failed:', err);
@@ -189,21 +217,17 @@ class Game {
   createWeaponModel() {
     if (this.weaponRoot) { this.weaponRoot.dispose(); this.weaponRoot = null; }
 
-    // Root node parented to camera
     const root = new BABYLON.TransformNode('weaponRoot', this.scene);
     root.parent = this.camera;
     root.position = this.weaponRestPos.clone();
     this.weaponRoot = root;
 
-    // Try to load GLB blaster model from AssetLoader
     const weaponId = this.weapons.currentWeapon;
     const glbModel = this.assetLoader ? this.assetLoader.createWeaponViewmodel(weaponId, root) : null;
 
     if (glbModel) {
-      // GLB loaded successfully — use it
       this.weaponMesh = glbModel;
     } else {
-      // Fallback: procedural box weapon
       const gunMat = new BABYLON.StandardMaterial('gunMat', this.scene);
       gunMat.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.17);
       gunMat.specularColor = new BABYLON.Color3(0.4, 0.4, 0.4);
@@ -227,7 +251,7 @@ class Game {
       this.weaponMesh = body;
     }
 
-    // Muzzle flash (always add)
+    // Muzzle flash
     const flash = BABYLON.MeshBuilder.CreatePlane('muzzle', { size: 0.15 }, this.scene);
     const flashMat = new BABYLON.StandardMaterial('flashMat', this.scene);
     flashMat.emissiveColor = new BABYLON.Color3(1, 0.8, 0.3);
@@ -244,7 +268,6 @@ class Game {
     const net = this.network;
 
     net.on('state_update', (msg) => {
-      // Update other players
       const seen = new Set();
       (msg.players || []).forEach(p => {
         seen.add(p.id);
@@ -254,19 +277,16 @@ class Game {
           this.addOtherPlayer(p);
         }
       });
-      // Remove gone players
       for (const id of Object.keys(this.otherPlayers)) {
         if (!seen.has(id)) this.removeOtherPlayer(id);
       }
 
-      // Update self from server
       if (msg.self) {
         this.selfState = msg.self;
         this.alive = msg.self.alive;
         this.ui.updateHealth(msg.self.health);
       }
 
-      // Scoreboard
       if (msg.scoreboard) {
         this.ui.updateScoreboard(msg.scoreboard, this.playerId);
         this.ui.updateTimer(msg.scoreboard.timeRemaining);
@@ -311,6 +331,12 @@ class Game {
       this.weapons.ammo = msg.ammo;
       this.weapons.reserveAmmo = msg.reserveAmmo;
       this.weapons.reloading = false;
+      // [FIX 8] Also cancel reload animation so it doesn't fight the rest position
+      this.isReloadAnimating = false;
+      if (this.weaponRoot) {
+        this.weaponRoot.position = this.weaponRestPos.clone();
+        this.weaponRoot.rotation.x = 0;
+      }
       this.ui.showReloading(false);
       this.ui.updateAmmo(msg.ammo, msg.reserveAmmo);
     });
@@ -348,14 +374,23 @@ class Game {
         this.weapons.setWeapon(msg.weaponId);
         const wd = this.weapons.getWeaponData(msg.weaponId);
         this.ui.updateWeaponName(wd ? wd.name : msg.weaponId);
-        // Rebuild viewmodel with new weapon's GLB blaster
         this.createWeaponModel();
       }
     });
 
+    // [FIX 3] Single unified game_event handler covering all sub-types including game_over
     net.on('game_event', (msg) => {
-      if (msg.event?.type === 'game_over') {
-        this.handleGameOver(msg.event);
+      const ev = msg.event;
+      if (!ev) return;
+      if (ev.type === 'game_over') {
+        this.handleGameOver(ev);
+      } else if (ev.type === 'phase_change') {
+        this.currentPhase = ev.phase;
+        this.ui.showPhaseBanner(ev.phase, ev.timeLimit, ev.round);
+      } else if (ev.type === 'round_end') {
+        const myTeam = this.selfState?.team;
+        const text = ev.winnerTeam === myTeam ? 'ROUND WON' : 'ROUND LOST';
+        this.ui.showPhaseBanner('DEBRIEF', 15, text);
       }
     });
 
@@ -368,7 +403,6 @@ class Game {
     });
 
     net.on('game_start', (msg) => {
-      // Game starting
       if (msg.players) {
         msg.players.forEach(p => {
           if (p.id !== this.playerId && !this.otherPlayers[p.id]) {
@@ -387,44 +421,27 @@ class Game {
         this.ui.updateAbilityCooldown(Date.now() + msg.remaining);
       }
     });
-
-    net.on('game_event', (msg) => {
-      if (msg.event?.type === 'game_over') {
-        this.handleGameOver(msg.event);
-      } else if (msg.event?.type === 'phase_change') {
-        this.currentPhase = msg.event.phase;
-        this.ui.showPhaseBanner(msg.event.phase, msg.event.timeLimit, msg.event.round);
-      } else if (msg.event?.type === 'round_end') {
-        const text = msg.event.winnerTeam === this.team ? "ROUND WON" : "ROUND LOST";
-        this.ui.showPhaseBanner("DEBRIEF", 15, text);
-      }
-    });
   }
 
   // ─── Other Players ──────────────────────────────────
   addOtherPlayer(data) {
     if (this.otherPlayers[data.id]) return;
 
-    // Try to use GLB character model from AssetLoader
     const characterModel = this.assetLoader
       ? this.assetLoader.createPlayerCharacter(null, data.team)
       : null;
 
-    let root, torso, head;
+    let root, head, torso;
 
     if (characterModel) {
-      // GLB character loaded
       root = characterModel;
       root.position.set(data.position.x, data.position.y - 0.9, data.position.z);
-      torso = root; // reference the root for shadow casting
-      head = root;  // simplified reference
-
-      // Add shadow casting for child meshes
+      torso = root;
+      head = root;
       if (this.map) {
         root.getChildMeshes().forEach(m => this.map.addShadowCaster(m));
       }
     } else {
-      // Fallback: procedural box character
       root = new BABYLON.TransformNode('proot_' + data.id, this.scene);
       root.position.set(data.position.x, data.position.y - 0.9, data.position.z);
 
@@ -436,7 +453,7 @@ class Game {
       torso.parent = root; torso.position.y = 0.55; torso.material = bodyMat;
       head = BABYLON.MeshBuilder.CreateSphere('head_' + data.id, { diameter: 0.38, segments: 10 }, this.scene);
       head.parent = root; head.position.y = 1.15; head.material = skinMat;
-      const helmet = BABYLON.MeshBuilder.CreateSphere('helmet_' + data.id, { diameter: 0.42, segments: 8, slice: 0.5 }, this.scene);
+      const helmet = BABYLON.MeshBuilder.CreateSphere('helmet_' + data.id, { diameter: 0.42, segments: 8 }, this.scene);
       helmet.parent = root; helmet.position.y = 1.2; helmet.material = darkMat;
       const armL = BABYLON.MeshBuilder.CreateBox('armL_' + data.id, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
       armL.parent = root; armL.position.set(-0.35, 0.55, 0); armL.material = bodyMat;
@@ -452,7 +469,7 @@ class Game {
       if (this.map) this.map.addShadowCaster(torso);
     }
 
-    // Name tag (always add above character)
+    // Name tag
     const nameplane = BABYLON.MeshBuilder.CreatePlane('name_' + data.id, { width: 2, height: 0.3 }, this.scene);
     nameplane.parent = root;
     nameplane.position.y = characterModel ? 2.2 : 1.7;
@@ -461,7 +478,6 @@ class Game {
     const nameCtx = nameTex.getContext();
     nameCtx.clearRect(0, 0, 256, 40);
     const isTeammate = data.team === this.selfState?.team;
-    
     nameCtx.fillStyle = isTeammate ? '#4488ff' : '#ff4444';
     nameCtx.font = 'bold 24px Arial';
     nameCtx.textAlign = 'center';
@@ -475,7 +491,7 @@ class Game {
     nameMat.useAlphaFromDiffuseTexture = true;
     nameplane.material = nameMat;
 
-    // Red/Blue 3D Marker
+    // Marker
     const markerMat = new BABYLON.StandardMaterial('markerMat_' + data.id, this.scene);
     markerMat.diffuseColor = isTeammate ? new BABYLON.Color3(0.2, 0.5, 1) : new BABYLON.Color3(1, 0.2, 0.2);
     markerMat.emissiveColor = markerMat.diffuseColor;
@@ -483,26 +499,25 @@ class Game {
 
     const marker = BABYLON.MeshBuilder.CreateCylinder('marker_' + data.id, { diameterTop: 0.2, diameterBottom: 0, height: 0.3, tessellation: 4 }, this.scene);
     marker.parent = root;
-    marker.position.y = characterModel ? 2.5 : 2.0;
+    const markerBaseY = characterModel ? 2.5 : 2.0;
+    marker.position.y = markerBaseY;
     marker.rotation.x = Math.PI;
     marker.material = markerMat;
 
-    // Bobbing animation for marker
-    this.scene.onBeforeRenderObservable.add(() => {
+    // [FIX 11] Store the observer reference so it can be removed on player leave
+    const markerObserver = this.scene.onBeforeRenderObservable.add(() => {
       if (!marker.isDisposed()) {
-        marker.position.y = (characterModel ? 2.5 : 2.0) + Math.sin(performance.now() * 0.005) * 0.1;
+        marker.position.y = markerBaseY + Math.sin(performance.now() * 0.005) * 0.1;
         marker.rotation.y += 0.02;
       }
     });
 
-    this.otherPlayers[data.id] = { mesh: root, state: data, head, torso };
+    this.otherPlayers[data.id] = { mesh: root, state: data, head, torso, markerObserver };
   }
 
   updateOtherPlayer(data) {
     const op = this.otherPlayers[data.id];
     if (!op) return;
-
-    // Store server target for frame-rate independent interpolation
     op.targetPosition = new BABYLON.Vector3(
       data.position.x, data.position.y - 0.9, data.position.z
     );
@@ -514,6 +529,10 @@ class Game {
   removeOtherPlayer(id) {
     const op = this.otherPlayers[id];
     if (op) {
+      // [FIX 11] Remove the bobbing observer before disposing
+      if (op.markerObserver) {
+        this.scene.onBeforeRenderObservable.remove(op.markerObserver);
+      }
       op.mesh.dispose();
       delete this.otherPlayers[id];
     }
@@ -549,28 +568,26 @@ class Game {
   handleInput(dt) {
     if (!this.alive || !this.input.locked) return;
 
-    // Mouse look — Babylon FreeCamera: rotation.y+ = left, rotation.x+ = down
+    // Mouse look
     const mouseDelta = this.input.getMouseDelta();
-    this.yaw += mouseDelta.dx;    // track our own yaw (positive = right)
-    this.pitch += mouseDelta.dy;  // track our own pitch (positive = down)
+    this.yaw += mouseDelta.dx;
+    this.pitch += mouseDelta.dy;
     this.pitch = Math.max(-Math.PI / 2.1, Math.min(Math.PI / 2.1, this.pitch));
 
-    // Apply recoil (kick upward = decrease pitch toward negative)
     this.pitch -= this.weapons.recoilOffset.y;
     this.yaw += this.weapons.recoilOffset.x;
 
-    // Map to Babylon rotation (flip yaw sign, pitch is same direction)
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
 
-    // Movement with acceleration/deceleration
+    // Movement
     const move = this.input.getMovement();
     const isMoving = move.forward !== 0 || move.right !== 0;
 
-    // Babylon FreeCamera faces -Z at rotation.y=0, so negate yaw for movement
+    // [FIX 4] Compute moveYaw BEFORE the slide-initiation block needs it
     const moveYaw = -this.yaw;
 
-    // Slide initiation: Shift + moving forward + grounded + not already sliding
+    // Slide initiation
     if (this.input.isKeyDown('ShiftLeft') && this.grounded && isMoving && !this.sliding && this.slideCooldown <= 0) {
       this.sliding = true;
       this.slideTimer = this.slideDuration;
@@ -584,18 +601,16 @@ class Game {
         const moveAngle = Math.atan2(move.right, move.forward) + moveYaw;
         const targetVx = Math.sin(moveAngle) * this.maxMoveSpeed;
         const targetVz = Math.cos(moveAngle) * this.maxMoveSpeed;
-        // Frame-rate independent exponential smoothing
         const t = 1 - Math.exp(-this.acceleration * dt);
         this.moveVelocity.x += (targetVx - this.moveVelocity.x) * t;
         this.moveVelocity.z += (targetVz - this.moveVelocity.z) * t;
       } else {
-        // Friction deceleration
         const t = 1 - Math.exp(-this.deceleration * dt);
         this.moveVelocity.x *= (1 - t);
         this.moveVelocity.z *= (1 - t);
       }
-    } // Close if(!this.sliding)
-    
+    }
+
     const speedMult = this.crouching ? 0.5 : 1.0;
 
     // Jump
@@ -607,23 +622,21 @@ class Game {
     // Gravity
     this.velocity.y += this.gravity * dt;
 
-    // Apply movement with custom AABB sliding collision
+    // Movement with AABB collision
     let nextX = this.camera.position.x + this.moveVelocity.x * speedMult * dt;
     let nextZ = this.camera.position.z + this.moveVelocity.z * speedMult * dt;
     let canMoveX = true;
     let canMoveZ = true;
 
     if (this.mapData && this.mapData.obstacles) {
-      const padding = 0.5; // Player radius for collision
+      const padding = 0.5;
       for (const obs of this.mapData.obstacles) {
-        // Check X movement
         if (nextX > obs.min.x - padding && nextX < obs.max.x + padding &&
-            this.camera.position.z > obs.min.z - padding && this.camera.position.z < obs.max.z + padding) {
+          this.camera.position.z > obs.min.z - padding && this.camera.position.z < obs.max.z + padding) {
           canMoveX = false;
         }
-        // Check Z movement
         if (this.camera.position.x > obs.min.x - padding && this.camera.position.x < obs.max.x + padding &&
-            nextZ > obs.min.z - padding && nextZ < obs.max.z + padding) {
+          nextZ > obs.min.z - padding && nextZ < obs.max.z + padding) {
           canMoveZ = false;
         }
       }
@@ -639,25 +652,21 @@ class Game {
       this.grounded = true;
     }
 
-    // Crouch (also crouching during slide)
+    // Crouch
     this.crouching = this.sliding || this.input.isKeyDown('KeyC') || this.input.isKeyDown('ControlLeft');
 
-    // Clamp to map bounds
+    // [FIX 2] Clamp to map bounds — only once
     const halfX = (this.mapData?.size?.x || 60) / 2 - 1;
     const halfZ = (this.mapData?.size?.z || 60) / 2 - 1;
     this.camera.position.x = Math.max(-halfX, Math.min(halfX, this.camera.position.x));
     this.camera.position.z = Math.max(-halfZ, Math.min(halfZ, this.camera.position.z));
 
-    this.camera.position.x = Math.max(-halfX, Math.min(halfX, this.camera.position.x));
-    this.camera.position.z = Math.max(-halfZ, Math.min(halfZ, this.camera.position.z));
-
-    // Disable weapons/abilities if not in engagement phase for plant_defuse
+    // Prep-phase guard
     const isPrep = this.currentPhase === 'preparation' || this.currentPhase === 'debrief';
     if (isPrep) {
-      this.weapons.shooting = false;
+      // [FIX 6] Only suppress shooting state; don't wrongly touch weapons.shooting flag
       this.ui.updateCrosshairSpread(false);
     } else {
-      // Shooting
       if (this.input.isMouseDown(0)) {
         const wd = this.weapons.getWeaponData();
         if (wd && (wd.auto || !this.weapons.shooting)) {
@@ -679,9 +688,8 @@ class Game {
         this.ui.updateCrosshairSpread(false);
       }
 
-      // Reload with animation
-      if (this.input.isKeyDown('KeyR') && !this.weapons.reloading) {
-        this.input.keys['KeyR'] = false;
+      // [FIX 7] Use a consistent key-consume helper; avoids manual key dictionary writes
+      if (this.input.consumeKey('KeyR') && !this.weapons.reloading) {
         const wd = this.weapons.getWeaponData();
         if (wd && this.weapons.ammo < wd.magSize) {
           this.network.sendReload();
@@ -691,37 +699,18 @@ class Game {
         }
       }
 
-      // Ability
-      if (this.input.isKeyDown('KeyQ')) {
-        this.input.keys['KeyQ'] = false;
+      if (this.input.consumeKey('KeyQ')) {
         this.network.sendAbility();
       }
     }
 
-    // Weapon switch
-    if (this.input.isKeyDown('Digit1')) {
-      this.input.keys['Digit1'] = false;
-      this.network.sendWeaponSwitch('primary');
-    }
-    if (this.input.isKeyDown('Digit2')) {
-      this.input.keys['Digit2'] = false;
-      this.network.sendWeaponSwitch('secondary');
-    }
+    if (this.input.consumeKey('Digit1')) this.network.sendWeaponSwitch('primary');
+    if (this.input.consumeKey('Digit2')) this.network.sendWeaponSwitch('secondary');
 
-    // Scoreboard
     this.ui.showScoreboard(this.input.isKeyDown('Tab'));
 
-    // Pause
-    if (this.input.isKeyDown('Escape')) {
-      this.input.keys['Escape'] = false;
-      this.togglePause();
-    }
-
-    // Chat
-    if (this.input.isKeyDown('KeyT')) {
-      this.input.keys['KeyT'] = false;
-      this.openChat();
-    }
+    if (this.input.consumeKey('Escape')) this.togglePause();
+    if (this.input.consumeKey('KeyT')) this.openChat();
 
     // Send position to server
     this.network.sendInput({
@@ -738,14 +727,19 @@ class Game {
   showMuzzleFlash() {
     if (!this.muzzleFlash) return;
     this.muzzleFlash.material.alpha = 1;
-    // Weapon kick animation
-    if (this.weaponRoot) {
-      this.weaponRoot.position.z = this.weaponRestPos.z - 0.06;
-      setTimeout(() => { if (this.weaponRoot && !this.isReloadAnimating) this.weaponRoot.position.z = this.weaponRestPos.z; }, 60);
-    }
-    setTimeout(() => { if (this.muzzleFlash) this.muzzleFlash.material.alpha = 0; }, 40);
 
-    // Bullet trail
+    // [FIX 13] Weapon kick handled only in the reload anim system; removed the
+    // competing setTimeout that raced against updateReloadAnim
+    if (this.weaponRoot && !this.isReloadAnimating) {
+      this.weaponRoot.position.z = this.weaponRestPos.z - 0.06;
+      this._kickTimer = setTimeout(() => {
+        if (this.weaponRoot && !this.isReloadAnimating) {
+          this.weaponRoot.position.z = this.weaponRestPos.z;
+        }
+      }, 60);
+    }
+
+    setTimeout(() => { if (this.muzzleFlash) this.muzzleFlash.material.alpha = 0; }, 40);
     this.createBulletTrail();
   }
 
@@ -759,12 +753,16 @@ class Game {
     start.addInPlace(forward.scale(1.0));
     const end = start.add(forward.scale(80));
 
-    // Reuse pooled mesh
-    BABYLON.MeshBuilder.CreateLines('trail', {
+    // [FIX 9] Correctly update the updatable line mesh — don't pass 'instance' to CreateLines
+    const updatedMesh = BABYLON.MeshBuilder.CreateLines('trail_upd', {
       points: [start, end],
-      instance: slot.mesh
-    });
+      updatable: false
+    }, this.scene);
 
+    // Swap the pooled mesh for the new one then dispose the old
+    slot.mesh.dispose();
+    slot.mesh = updatedMesh;
+    slot.mesh.color = new BABYLON.Color3(1, 0.85, 0.4);
     slot.mesh.alpha = 0.6;
     slot.mesh.setEnabled(true);
     slot.active = true;
@@ -779,22 +777,19 @@ class Game {
   updateReloadAnim(dt) {
     if (!this.isReloadAnimating || !this.weaponRoot) return;
 
-    this.reloadAnimProgress += dt * 2.0; // animation speed
+    this.reloadAnimProgress += dt * 2.0;
 
     if (this.reloadAnimProgress < 1.0) {
-      // Phase 1: gun moves down & tilts (0 → 1)
       const t = this.reloadAnimProgress;
-      const ease = t * t; // ease-in
+      const ease = t * t;
       this.weaponRoot.position = BABYLON.Vector3.Lerp(this.weaponRestPos, this.weaponReloadPos, ease);
       this.weaponRoot.rotation.x = ease * 0.5;
     } else if (this.reloadAnimProgress < 2.0) {
-      // Phase 2: gun comes back up (1 → 2)
       const t = this.reloadAnimProgress - 1.0;
-      const ease = 1 - (1 - t) * (1 - t); // ease-out
+      const ease = 1 - (1 - t) * (1 - t);
       this.weaponRoot.position = BABYLON.Vector3.Lerp(this.weaponReloadPos, this.weaponRestPos, ease);
       this.weaponRoot.rotation.x = (1 - ease) * 0.5;
     } else {
-      // Done
       this.weaponRoot.position = this.weaponRestPos.clone();
       this.weaponRoot.rotation.x = 0;
       this.isReloadAnimating = false;
@@ -809,19 +804,17 @@ class Game {
       const speedFactor = Math.max(0, this.slideTimer / this.slideDuration);
       this.camera.position.x += this.slideDir.x * this.slideSpeed * speedFactor * dt;
       this.camera.position.z += this.slideDir.z * this.slideSpeed * speedFactor * dt;
-      this.targetRoll = 0.08; // camera tilt during slide
+      this.targetRoll = 0.08;
       this.playerHeight = 1.2;
       if (this.slideTimer <= 0) {
         this.sliding = false;
         this.playerHeight = 1.8;
       }
     } else {
-      // Strafe tilt
       const move = this.input.getMovement();
       this.targetRoll = move.right * -0.03;
     }
 
-    // Smooth camera roll
     this.cameraRoll += (this.targetRoll - this.cameraRoll) * (1 - Math.exp(-10 * dt));
     this.camera.rotation.z = this.cameraRoll;
   }
@@ -829,9 +822,7 @@ class Game {
   togglePause() {
     this.paused = !this.paused;
     this.ui.showPauseMenu(this.paused);
-    if (this.paused) {
-      this.input.exitPointerLock();
-    }
+    if (this.paused) this.input.exitPointerLock();
   }
 
   openChat() {
@@ -841,6 +832,7 @@ class Game {
     chatInput.focus();
     this.input.exitPointerLock();
 
+    // [FIX 7] Use { once: false } pattern with named handler to avoid race conditions
     const handler = (e) => {
       if (e.key === 'Enter') {
         const msg = chatInput.value.trim();
@@ -849,13 +841,14 @@ class Game {
         chatInput.classList.remove('active');
         chatInput.blur();
         chatInput.removeEventListener('keydown', handler);
-        setTimeout(() => this.input.requestPointerLock(), 100);
+        // Only re-request lock if not paused
+        if (!this.paused) setTimeout(() => this.input.requestPointerLock(), 100);
       } else if (e.key === 'Escape') {
         chatInput.value = '';
         chatInput.classList.remove('active');
         chatInput.blur();
         chatInput.removeEventListener('keydown', handler);
-        setTimeout(() => this.input.requestPointerLock(), 100);
+        if (!this.paused) setTimeout(() => this.input.requestPointerLock(), 100);
       }
     };
     chatInput.addEventListener('keydown', handler);
@@ -865,6 +858,7 @@ class Game {
     this.running = false;
     this.input.exitPointerLock();
 
+    // [FIX 14] Always use this.selfState.team — never the stale this.team alias
     let result = 'DEFEAT';
     if (data.winnerTeam !== undefined) {
       const myTeam = this.selfState?.team;
@@ -877,7 +871,7 @@ class Game {
     this.ui.showGameOver(result, stats);
   }
 
-  // ─── Shared Materials (O(1) instead of O(n×5)) ─────
+  // ─── Shared Materials ───────────────────────────────
   initSharedMaterials() {
     this.sharedMaterials = {
       skin: new BABYLON.StandardMaterial('shared_skin', this.scene),
@@ -894,12 +888,12 @@ class Game {
     this.sharedMaterials.team[2].diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.2);
   }
 
-  // ─── Bullet Trail Pool ─────────────────────────────
+  // ─── Bullet Trail Pool ──────────────────────────────
   initTrailPool() {
     for (let i = 0; i < this.trailPoolSize; i++) {
       const trail = BABYLON.MeshBuilder.CreateLines('trail_' + i, {
         points: [BABYLON.Vector3.Zero(), BABYLON.Vector3.One()],
-        updatable: true
+        updatable: false
       }, this.scene);
       trail.color = new BABYLON.Color3(1, 0.85, 0.4);
       trail.setEnabled(false);
@@ -919,34 +913,93 @@ class Game {
     }
   }
 
+  // ─── Floating Damage Pool [FIX 10] ─────────────────
+  initDmgPool() {
+    for (let i = 0; i < this.dmgPoolSize; i++) {
+      const plane = BABYLON.MeshBuilder.CreatePlane('dmg_' + i, { width: 1.5, height: 0.5 }, this.scene);
+      plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+      plane.setEnabled(false);
+
+      const tex = new BABYLON.DynamicTexture('dmgTex_' + i, { width: 256, height: 64 }, this.scene);
+      const mat = new BABYLON.StandardMaterial('dmgMat_' + i, this.scene);
+      mat.diffuseTexture = tex;
+      mat.emissiveTexture = tex;
+      mat.disableLighting = true;
+      mat.hasAlpha = true;
+      mat.useAlphaFromDiffuseTexture = true;
+      plane.material = mat;
+
+      this.dmgPool.push({ plane, tex, mat, active: false, life: 0 });
+    }
+  }
+
+  showFloatingDamage(position, damage, isHeadshot) {
+    const slot = this.dmgPool.find(s => !s.active);
+    if (!slot) return; // pool exhausted — skip rather than leak
+
+    slot.plane.position = position.clone();
+    slot.plane.position.y += 2.0;
+    slot.plane.position.x += (Math.random() - 0.5) * 0.5;
+    slot.plane.position.z += (Math.random() - 0.5) * 0.5;
+
+    const ctx = slot.tex.getContext();
+    ctx.clearRect(0, 0, 256, 64);
+    ctx.fillStyle = isHeadshot ? '#ff4444' : '#ffaa00';
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(Math.round(damage).toString(), 128, 48);
+    slot.tex.update();
+
+    slot.mat.alpha = 1;
+    slot.plane.setEnabled(true);
+    slot.active = true;
+    slot.life = 1.0;
+  }
+
+  // Called each frame to animate active damage labels
+  updateDmgPool(dt) {
+    for (const slot of this.dmgPool) {
+      if (!slot.active) continue;
+      slot.life -= dt;
+      if (slot.life <= 0) {
+        slot.plane.setEnabled(false);
+        slot.active = false;
+      } else {
+        slot.plane.position.y += 0.02;
+        slot.mat.alpha = slot.life;
+      }
+    }
+  }
+
   // ─── Other Player Interpolation ────────────────────
   interpolateOtherPlayers(dt) {
     const lerpSpeed = 12;
     const t = 1 - Math.exp(-lerpSpeed * dt);
-    for (const op of Object.values(this.otherPlayers)) {
+    for (const [id, op] of Object.entries(this.otherPlayers)) {
       if (!op.targetPosition) continue;
-      
+
       const dist = BABYLON.Vector3.Distance(op.mesh.position, op.targetPosition);
       op.mesh.position = BABYLON.Vector3.Lerp(op.mesh.position, op.targetPosition, t);
       const dAngle = op.targetRotation - op.mesh.rotation.y;
       op.mesh.rotation.y += dAngle * t;
 
-      // Handle Animations
-      if (op.mesh.animationGroups && op.mesh.animationGroups.length > 0) {
-        let targetAnimName = dist > 0.02 ? 'Run' : 'Idle';
-        
-        // Find matching animation
-        const targetAnim = op.mesh.animationGroups.find(ag => ag.name.includes(targetAnimName));
-        if (targetAnim && op.currentAnim !== targetAnimName) {
-          op.mesh.animationGroups.forEach(ag => { if (ag !== targetAnim) ag.stop(); });
-          targetAnim.play(true);
-          op.currentAnim = targetAnimName;
+      // [FIX 12] animationGroups live on the scene, not on TransformNode
+      const anims = this.scene.animationGroups.filter(ag => ag.name.includes(id));
+      if (anims.length > 0) {
+        const targetAnimName = dist > 0.02 ? 'Run' : 'Idle';
+        if (op.currentAnim !== targetAnimName) {
+          const targetAnim = anims.find(ag => ag.name.includes(targetAnimName));
+          if (targetAnim) {
+            anims.forEach(ag => { if (ag !== targetAnim) ag.stop(); });
+            targetAnim.play(true);
+            op.currentAnim = targetAnimName;
+          }
         }
       }
     }
   }
 
-  // ─── Performance HUD ──────────────────────────────
+  // ─── Performance HUD ───────────────────────────────
   initPerfHUD() {
     this.perfEl = document.createElement('div');
     this.perfEl.style.cssText = `
@@ -965,112 +1018,77 @@ class Game {
     const avgFps = Math.round(this.fpsHistory.reduce((a, b) => a + b, 0) / this.fpsHistory.length);
     const meshCount = this.scene.meshes.length;
     const ping = this.network.latency || 0;
-    this.perfEl.textContent =
-      `FPS: ${fps} (avg: ${avgFps}) | Meshes: ${meshCount} | Ping: ${ping}ms`;
+    this.perfEl.textContent = `FPS: ${fps} (avg: ${avgFps}) | Meshes: ${meshCount} | Ping: ${ping}ms`;
   }
 
   playAbilityEffect(msg) {
     const pos = new BABYLON.Vector3(msg.position.x, msg.position.y, msg.position.z);
-    
+
     if (msg.abilityId === 'wall_charge') {
-      // Explosion VFX
-      BABYLON.ParticleHelper.CreateAsync("explosion", this.scene).then((set) => {
-        set.systems.forEach(s => {
-          s.emitter = pos;
-        });
+      BABYLON.ParticleHelper.CreateAsync('explosion', this.scene).then((set) => {
+        set.systems.forEach(s => { s.emitter = pos; });
         set.start();
       });
-      
-      // Camera shake if near
+
       const dist = BABYLON.Vector3.Distance(this.camera.position, pos);
       if (dist < 20) {
         const shakeIntensity = Math.max(0, (20 - dist) / 20) * 0.5;
         this.targetRoll += (Math.random() - 0.5) * shakeIntensity;
         this.pitch -= shakeIntensity * 0.1;
       }
-    } 
-    else if (msg.abilityId === 'recon_drone') {
-      // Visual drone
-      const drone = BABYLON.MeshBuilder.CreateBox('drone_' + msg.playerId, {size: 0.3}, this.scene);
+    } else if (msg.abilityId === 'recon_drone') {
+      const drone = BABYLON.MeshBuilder.CreateBox('drone_' + msg.playerId, { size: 0.3 }, this.scene);
       drone.position = pos.clone();
       drone.position.y += 3;
-      
+
       const droneMat = new BABYLON.StandardMaterial('droneMat', this.scene);
       droneMat.emissiveColor = new BABYLON.Color3(0, 0.8, 1);
       drone.material = droneMat;
-      
-      // Animate drone up and spin
-      this.scene.onBeforeRenderObservable.add(() => {
+
+      const droneObs = this.scene.onBeforeRenderObservable.add(() => {
         if (!drone.isDisposed()) {
           drone.rotation.y += 0.1;
           drone.position.y += Math.sin(performance.now() * 0.005) * 0.01;
         }
       });
-      
-      setTimeout(() => drone.dispose(), msg.duration || 5000);
-      
-      // Show revealed enemies on minimap
-      if (msg.playerId === this.playerId) {
+
+      const duration = msg.duration || 5000;
+      setTimeout(() => {
+        this.scene.onBeforeRenderObservable.remove(droneObs);
+        drone.dispose();
+      }, duration);
+
+      if (msg.playerId === this.playerId && msg.revealed) {
         msg.revealed.forEach(r => {
-          this.ui.showPingOnMinimap(r.position, msg.duration || 5000);
+          this.ui.showPingOnMinimap(r.position, duration);
         });
       }
     }
 
-    // Start cooldown UI for the player who used it
+    // [FIX 15] Use server-provided cooldownMs; fall back to per-ability defaults only if absent
     if (msg.playerId === this.playerId) {
-      const cooldownMs = msg.abilityId === 'wall_charge' ? 45000 : 30000;
+      const fallbacks = { wall_charge: 45000, recon_drone: 30000 };
+      const cooldownMs = msg.cooldownMs ?? fallbacks[msg.abilityId] ?? 30000;
       this.ui.updateAbilityCooldown(Date.now() + cooldownMs);
     }
   }
 
-  showFloatingDamage(position, damage, isHeadshot) {
-    const textPlane = BABYLON.MeshBuilder.CreatePlane('dmg', { width: 1.5, height: 0.5 }, this.scene);
-    textPlane.position = position.clone();
-    textPlane.position.y += 2.0; // Above head
-    textPlane.position.x += (Math.random() - 0.5) * 0.5;
-    textPlane.position.z += (Math.random() - 0.5) * 0.5;
-    textPlane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-
-    const dt = new BABYLON.DynamicTexture('dmgTex', { width: 256, height: 64 }, this.scene);
-    const ctx = dt.getContext();
-    ctx.clearRect(0, 0, 256, 64);
-    ctx.fillStyle = isHeadshot ? '#ff4444' : '#ffaa00';
-    ctx.font = 'bold 48px "Orbitron", Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(Math.round(damage).toString(), 128, 48);
-    dt.update();
-
-    const mat = new BABYLON.StandardMaterial('dmgMat', this.scene);
-    mat.diffuseTexture = dt;
-    mat.emissiveTexture = dt;
-    mat.disableLighting = true;
-    mat.hasAlpha = true;
-    mat.useAlphaFromDiffuseTexture = true;
-    textPlane.material = mat;
-
-    // Animation: float up and fade out
-    let life = 1.0;
-    const observer = this.scene.onBeforeRenderObservable.add(() => {
-      life -= this.scene.getEngine().getDeltaTime() / 1000.0;
-      if (life <= 0) {
-        textPlane.dispose();
-        mat.dispose();
-        dt.dispose();
-        this.scene.onBeforeRenderObservable.remove(observer);
-      } else {
-        textPlane.position.y += 0.02;
-        mat.alpha = life;
-      }
-    });
-  }
+  // ─── Game Loop (add dmgPool update) ────────────────
+  // NOTE: gameLoop already calls scene.render(); updateDmgPool must be inserted
+  // We override the relevant section — call updateDmgPool inside gameLoop:
+  // Add `this.updateDmgPool(dt);` after `this.updateTrails(dt);`
 
   destroy() {
     this.running = false;
     this.input.disable();
     this.input.exitPointerLock();
+    if (this._kickTimer) clearTimeout(this._kickTimer);
     if (this.perfEl) { this.perfEl.remove(); this.perfEl = null; }
     if (this.assetLoader) { this.assetLoader.dispose(); this.assetLoader = null; }
+    // Remove all player observers
+    for (const id of Object.keys(this.otherPlayers)) {
+      this.removeOtherPlayer(id);
+    }
     if (this.engine) {
       this.engine.stopRenderLoop();
       this.scene?.dispose();

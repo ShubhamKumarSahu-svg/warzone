@@ -149,6 +149,12 @@
               <option value="snd">Search & Destroy</option>
               <option value="domination">Domination</option>
             </select>
+            <select id="room-map-select" class="weapon-select" style="margin-top: 10px;">
+              <option value="gridlock">Gridlock (City)</option>
+              <option value="plaza">Plaza (Open Area)</option>
+              <option value="suburbs">Suburbs (Street)</option>
+              <option value="warehouse">Warehouse (Small CQB)</option>
+            </select>
             <div class="create-room-row">
               <label>Bots: <span id="bot-count-val">2</span></label>
               <input type="range" id="bot-count" min="0" max="8" value="2" class="slider" oninput="document.getElementById('bot-count-val').textContent=this.value">

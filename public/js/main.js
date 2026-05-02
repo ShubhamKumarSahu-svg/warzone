@@ -266,11 +266,12 @@ function createRoom() {
   if (!network || !network.connected) return;
   const name = document.getElementById('room-name-input')?.value || '';
   const mode = document.getElementById('room-mode-select')?.value || 'tdm';
+  const map = document.getElementById('room-map-select')?.value || 'gridlock';
   const bots = parseInt(document.getElementById('bot-count')?.value || '2');
   showScreen('loading-screen');
   const fill = document.getElementById('loading-fill');
   if (fill) fill.style.width = '20%';
-  network.createRoom({ name, mode, bots });
+  network.createRoom({ name, mode, map, bots });
 }
 
 // ─── Game ───────────────────────────────────────────────
