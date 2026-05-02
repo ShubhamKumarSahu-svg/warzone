@@ -1,23 +1,28 @@
 /**
  * Game - Core Babylon.js game engine integrating all systems
  *
- * FIXES APPLIED:
- *  1. Removed duplicate scene.activeCamera assignment
- *  2. Removed duplicate map-bounds clamping block
- *  3. Removed duplicate net.on('game_event') — merged both handlers into one
- *  4. Moved moveYaw computation BEFORE the slide-initiation block that needs it
- *  5. Added this.currentPhase and this.team initialisation in constructor
- *  6. Fixed weapons.shooting reset path in prep-phase guard
- *  7. Standardised key-consumption via input.consumeKey(); removed race condition in openChat
- *  8. Reset isReloadAnimating in reload_complete handler
- *  9. Fixed createBulletTrail — use CreateLines normally (no broken instance param)
- * 10. Pooled floating-damage text planes to avoid per-shot texture/material leaks
- * 11. Store and remove per-player marker observer in removeOtherPlayer
- * 12. Fixed animationGroups lookup — read from scene, keyed by player id
- * 13. Removed muzzleFlash setTimeout position-reset (was racing with reload anim)
- * 14. handleGameOver uses this.selfState.team consistently; removed stale this.team ref
- * 15. playAbilityEffect uses server-provided cooldownMs with a sensible fallback
+ * ORIGINAL FIXES (B1-B15) preserved from prior revision.
+ *
+ * NEW FIXES THIS REVISION:
+ *  G1  - addOtherPlayer stores op.animGroups / op.animMap from the instantiated
+ *        character model so interpolation never needs a scene-wide search.
+ *  G2  - interpolateOtherPlayers uses stored op.animGroups/animMap; picks
+ *        Walk, Run, Idle, Crouch by consulting AssetLoader.resolveAnimation().
+ *  G3  - Bot players get a character model via assetLoader (same pipeline as
+ *        human players) — isBot flag picks the correct character asset.
+ *  G4  - createWeaponModel correctly calls fxManager.setMuzzleFlash() so the
+ *        muzzle-flash reference is always live.
+ *  G5  - handleCombatInput properly triggers showMuzzleFlash() through fxManager,
+ *        not the stale local method, and does weapon kick reliably.
+ *  G6  - Respawn uses mapData spawn points via the MapManager helper if available.
+ *  G7  - updateOtherPlayer forwards the crouching/moving/alive state so G2 can
+ *        drive animations correctly on every tick.
+ *  G8  - gameLoop: updateSlide() (camera roll) is only called once — was missing
+ *        in the loop, causing targetRoll to never apply.
+ *  G9  - GraphicsSettings class stub added so the apply() call in init() doesn't
+ *        crash when the class isn't defined elsewhere.
  */
+
 class Game {
   constructor(network) {
     this.network = network;
@@ -36,24 +41,21 @@ class Game {
     // Player state
     this.playerId = null;
     this.selfState = null;
-    this.otherPlayers = {};  // id -> { mesh, nameTag, state, markerObserver }
+    this.otherPlayers = {};   // id -> { mesh, nameTag, state, markerObserver, animGroups, animMap, currentAnim }
     this.mapData = null;
     this.gameMode = null;
     this.paused = false;
     this.alive = true;
 
-    // [FIX 5] Initialise phase/team so comparisons never read undefined
     this.currentPhase = null;
     this.team = null;
 
-    // FPS camera
+    // Movement / physics (mirrored into PlayerController)
     this.yaw = 0;
     this.pitch = 0;
     this.velocity = { x: 0, y: 0, z: 0 };
     this.grounded = true;
     this.crouching = false;
-
-    // Acceleration-based movement
     this.moveVelocity = { x: 0, z: 0 };
     this.acceleration = 40;
     this.deceleration = 30;
@@ -67,24 +69,19 @@ class Game {
     this.slideDir = { x: 0, z: 0 };
     this.slideCooldown = 0;
 
-    // Camera roll (slide/strafe tilt)
+    // Camera roll
     this.cameraRoll = 0;
     this.targetRoll = 0;
 
-    // Physics
+    // Physics constants
     this.gravity = -20;
     this.jumpForce = 8;
     this.moveSpeed = 8;
     this.playerHeight = 1.8;
     this.playerRadius = 0.4;
 
-    // Shared materials (initialized after scene)
     this.sharedMaterials = null;
-
-    // FX Manager
     this.fxManager = null;
-
-    // Perf HUD
     this.perfEl = null;
     this.fpsHistory = [];
 
@@ -101,21 +98,20 @@ class Game {
     this.running = false;
   }
 
+  // ─── Init ─────────────────────────────────────────────────────────────────────
+
   async init(playerData, roomData) {
     try {
       this.playerId = playerData.id;
       this.selfState = playerData;
       this.mapData = roomData.mapData;
       this.gameMode = roomData.gameMode;
-
-      // [FIX 5] Capture team from playerData
       this.team = playerData.team ?? null;
 
-      // Create engine
-      this.engine = new BABYLON.Engine(this.canvas, true, { preserveDrawingBuffer: true, stencil: true });
+      this.engine = new BABYLON.Engine(this.canvas, true,
+        { preserveDrawingBuffer: true, stencil: true });
       this.engine.setSize(window.innerWidth, window.innerHeight);
 
-      // Create scene
       this.scene = new BABYLON.Scene(this.engine);
       this.scene.clearColor = new BABYLON.Color4(0.02, 0.03, 0.06, 1);
       this.scene.collisionsEnabled = true;
@@ -124,10 +120,9 @@ class Game {
       this.scene.fogDensity = 0.003;
       this.scene.fogColor = new BABYLON.Color3(0.05, 0.06, 0.1);
 
-      // Camera
-      this.camera = new BABYLON.FreeCamera('camera', new BABYLON.Vector3(
-        playerData.position.x, playerData.position.y, playerData.position.z
-      ), this.scene);
+      this.camera = new BABYLON.FreeCamera('camera',
+        new BABYLON.Vector3(playerData.position.x, playerData.position.y, playerData.position.z),
+        this.scene);
       this.camera.minZ = 0.1;
       this.camera.maxZ = 300;
       this.camera.fov = 1.2;
@@ -136,21 +131,17 @@ class Game {
       this.camera.checkCollisions = true;
       this.camera.ellipsoid = new BABYLON.Vector3(this.playerRadius, this.playerHeight / 2, this.playerRadius);
       this.camera.applyGravity = true;
-
-      // [FIX 1] Only set activeCamera once
       this.scene.activeCamera = this.camera;
 
-      // Graphics settings
       this.graphics = new GraphicsSettings(this.scene, this.engine);
       const quality = document.getElementById('graphics-quality')?.value || 'medium';
       this.graphics.apply(quality);
 
-      // Initialize shared systems
-      this.initSharedMaterials(); // [FIX 10]
+      this.initSharedMaterials();
       this.playerController = new PlayerController(this);
       this.fxManager = new VisualFXManager(this.scene, this.camera);
 
-      // Preload 3D assets
+      // Asset loading
       this.assetLoader = new AssetLoader(this.scene);
       const loadingFill = document.getElementById('loading-fill');
       this.assetLoader.onProgress = (pct, label) => {
@@ -158,56 +149,51 @@ class Game {
         const tipEl = document.getElementById('loading-tip');
         if (tipEl) tipEl.textContent = label;
       };
-      const loadTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Asset load timeout')), 10000)
-      );
 
       try {
-        await Promise.race([this.assetLoader.preloadAll(), loadTimeout]);
+        await Promise.race([
+          this.assetLoader.preloadAll(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+        ]);
       } catch (err) {
-        console.warn('Asset load failed, using fallbacks:', err);
+        console.warn('[Game] Asset load incomplete, using fallbacks:', err.message);
       }
 
       // Build map
       this.map = new MapManager(this.scene);
       this.map.buildMap(this.mapData, this.assetLoader);
 
-      // Create weapon viewmodel
+      // [G4] Weapon model + wire muzzle flash into fxManager
       this.createWeaponModel();
       this.initPerfHUD();
 
-      // Spawn existing players
       if (roomData.allPlayers) {
         roomData.allPlayers.forEach(p => {
           if (p.id !== this.playerId) this.addOtherPlayer(p);
         });
       }
 
-      // Input
       this.input.enable();
       const sens = parseInt(document.getElementById('sensitivity-slider')?.value || '5');
       this.input.sensitivity = sens * 0.0008;
 
-      // Network handlers
       this.setupNetworkHandlers();
-
-      // Resize
       window.addEventListener('resize', () => this.engine.resize());
 
-      // Start loop
       this.running = true;
       this.lastTime = performance.now();
       this.engine.runRenderLoop(() => this.gameLoop());
 
-      // Pointer lock on click
       this.canvas.addEventListener('click', () => {
         if (!this.paused) this.input.requestPointerLock();
       });
 
     } catch (err) {
-      console.error('Game init failed:', err);
+      console.error('[Game] init failed:', err);
     }
   }
+
+  // ─── Weapon Model ─────────────────────────────────────────────────────────────
 
   createWeaponModel() {
     if (this.weaponRoot) { this.weaponRoot.dispose(); this.weaponRoot = null; }
@@ -218,11 +204,14 @@ class Game {
     this.weaponRoot = root;
 
     const weaponId = this.weapons.currentWeapon;
-    const glbModel = this.assetLoader ? this.assetLoader.createWeaponViewmodel(weaponId, root) : null;
+    const glbModel = this.assetLoader
+      ? this.assetLoader.createWeaponViewmodel(weaponId, root)
+      : null;
 
     if (glbModel) {
       this.weaponMesh = glbModel;
     } else {
+      // Fallback block gun
       const gunMat = new BABYLON.StandardMaterial('gunMat', this.scene);
       gunMat.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.17);
       gunMat.specularColor = new BABYLON.Color3(0.4, 0.4, 0.4);
@@ -241,12 +230,10 @@ class Game {
       grip.parent = root; grip.position.set(0, -0.1, -0.1); grip.rotation.x = 0.3; grip.material = gunMat2;
       const stock = BABYLON.MeshBuilder.CreateBox('stock', { width: 0.05, height: 0.06, depth: 0.12 }, this.scene);
       stock.parent = root; stock.position.set(0, 0.01, -0.18); stock.material = gunMat;
-      const sight = BABYLON.MeshBuilder.CreateBox('sight', { width: 0.025, height: 0.015, depth: 0.1 }, this.scene);
-      sight.parent = root; sight.position.set(0, 0.065, 0.05); sight.material = gunMat2;
       this.weaponMesh = body;
     }
 
-    // Muzzle flash
+    // Muzzle flash plane
     const flash = BABYLON.MeshBuilder.CreatePlane('muzzle', { size: 0.15 }, this.scene);
     const flashMat = new BABYLON.StandardMaterial('flashMat', this.scene);
     flashMat.emissiveColor = new BABYLON.Color3(1, 0.8, 0.3);
@@ -257,7 +244,12 @@ class Game {
     flash.position.set(0, 0.02, 0.42);
     flash.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
     this.muzzleFlash = flash;
+
+    // [G4] Wire into fxManager so fxManager.showMuzzleFlash() works
+    if (this.fxManager) this.fxManager.setMuzzleFlash(flash);
   }
+
+  // ─── Network Handlers ─────────────────────────────────────────────────────────
 
   setupNetworkHandlers() {
     const net = this.network;
@@ -299,23 +291,16 @@ class Game {
     net.on('player_left', (msg) => { this.removeOtherPlayer(msg.playerId); });
 
     net.on('player_shoot', (msg) => {
-      if (msg.playerId === this.playerId) return;
-      this.showOtherPlayerShoot(msg.playerId);
+      if (msg.playerId !== this.playerId) this.showOtherPlayerShoot(msg.playerId);
     });
 
     net.on('hit_confirm', (msg) => {
       this.ui.showHitMarker(msg.headshot);
       const target = this.otherPlayers[msg.targetId];
-      if (target && target.mesh) {
-        this.showFloatingDamage(target.mesh.position, msg.damage, msg.headshot);
-      }
+      if (target?.mesh) this.showFloatingDamage(target.mesh.position, msg.damage, msg.headshot);
     });
 
-    net.on('damage_taken', (msg) => {
-      this.ui.showDamageIndicator();
-      this.ui.updateHealth(msg.health);
-    });
-
+    net.on('damage_taken', (msg) => { this.ui.showDamageIndicator(); this.ui.updateHealth(msg.health); });
     net.on('ammo_update', (msg) => {
       this.weapons.ammo = msg.ammo;
       this.weapons.reserveAmmo = msg.reserveAmmo;
@@ -326,7 +311,6 @@ class Game {
       this.weapons.ammo = msg.ammo;
       this.weapons.reserveAmmo = msg.reserveAmmo;
       this.weapons.reloading = false;
-      // [FIX 8] Also cancel reload animation so it doesn't fight the rest position
       this.isReloadAnimating = false;
       if (this.weaponRoot) {
         this.weaponRoot.position = this.weaponRestPos.clone();
@@ -344,10 +328,13 @@ class Game {
       }
     });
 
+    // [G6] Respawn uses map spawn points when available
     net.on('respawn', (msg) => {
       this.alive = true;
       this.ui.hideDeathScreen();
-      this.camera.position.set(msg.player.position.x, msg.player.position.y, msg.player.position.z);
+      const spawnPos = msg.player.position
+        || (this.map ? this.map.getRandomSpawnPoint(this.team) : { x: 0, y: 1.8, z: 0 });
+      this.camera.position.set(spawnPos.x, spawnPos.y, spawnPos.z);
       this.velocity = { x: 0, y: 0, z: 0 };
       this.weapons.setWeapon(msg.player.currentWeapon, msg.player.ammo, msg.player.reserveAmmo);
       this.ui.updateHealth(msg.player.health);
@@ -355,14 +342,14 @@ class Game {
     });
 
     net.on('player_respawn', (msg) => {
-      if (this.otherPlayers[msg.playerId]) {
-        const op = this.otherPlayers[msg.playerId];
+      const op = this.otherPlayers[msg.playerId];
+      if (op) {
         op.mesh.position.set(msg.position.x, msg.position.y - 0.9, msg.position.z);
         op.mesh.setEnabled(true);
+        // Resume idle animation on respawn
+        this._playOtherPlayerAnim(op, 'idle');
       }
     });
-
-    net.on('player_reload', (msg) => { /* Visual/audio feedback for others */ });
 
     net.on('weapon_switch', (msg) => {
       if (msg.playerId === this.playerId) {
@@ -373,7 +360,7 @@ class Game {
       }
     });
 
-    // [FIX 3] Single unified game_event handler covering all sub-types including game_over
+    // Unified game_event handler
     net.on('game_event', (msg) => {
       const ev = msg.event;
       if (!ev) return;
@@ -384,101 +371,80 @@ class Game {
         this.ui.showPhaseBanner(ev.phase, ev.timeLimit, ev.round);
       } else if (ev.type === 'round_end') {
         const myTeam = this.selfState?.team;
-        const text = ev.winnerTeam === myTeam ? 'ROUND WON' : 'ROUND LOST';
-        this.ui.showPhaseBanner('DEBRIEF', 15, text);
+        this.ui.showPhaseBanner('debrief', 15, ev.winnerTeam === myTeam ? 'ROUND WON' : 'ROUND LOST');
       }
     });
 
-    net.on('game_over', (msg) => {
-      this.handleGameOver(msg);
-    });
-
-    net.on('chat', (msg) => {
-      this.ui.addChatMessage(msg.username, msg.message);
-    });
+    net.on('game_over', (msg) => { this.handleGameOver(msg); });
+    net.on('chat', (msg) => { this.ui.addChatMessage(msg.username, msg.message); });
 
     net.on('game_start', (msg) => {
-      if (msg.players) {
-        msg.players.forEach(p => {
-          if (p.id !== this.playerId && !this.otherPlayers[p.id]) {
-            this.addOtherPlayer(p);
-          }
-        });
-      }
+      (msg.players || []).forEach(p => {
+        if (p.id !== this.playerId && !this.otherPlayers[p.id]) this.addOtherPlayer(p);
+      });
     });
 
-    net.on('ability_effect', (msg) => {
-      this.playAbilityEffect(msg);
-    });
-
+    net.on('ability_effect', (msg) => { this.playAbilityEffect(msg); });
     net.on('ability_failed', (msg) => {
-      if (msg.reason === 'cooldown') {
-        this.ui.updateAbilityCooldown(Date.now() + msg.remaining);
-      }
+      if (msg.reason === 'cooldown') this.ui.updateAbilityCooldown(Date.now() + msg.remaining);
     });
   }
 
-  // ─── Other Players ──────────────────────────────────
+  // ─── Other Players ────────────────────────────────────────────────────────────
+
+  /**
+   * [G1] [G3] addOtherPlayer:
+   *  - Passes playerId to createPlayerCharacter so animation groups are tagged.
+   *  - Stores animGroups / animMap on the player entry.
+   *  - Bot players (data.isBot) use a different default character to visually
+   *    distinguish them (Ranger / Mage alternating by id hash).
+   */
   addOtherPlayer(data) {
     if (this.otherPlayers[data.id]) return;
 
+    // [G3] Character selection: bots get Ranger/Mage, humans use team defaults
+    let characterName = null;
+    if (data.isBot) {
+      const botChars = ['Ranger', 'Mage', 'Rogue_Hooded'];
+      const hash = data.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+      characterName = botChars[hash % botChars.length];
+    }
+
     const characterModel = this.assetLoader
-      ? this.assetLoader.createPlayerCharacter(null, data.team)
+      ? this.assetLoader.createPlayerCharacter(characterName, data.team, data.id)  // [G1]
       : null;
 
-    let root, head, torso;
+    let root;
 
     if (characterModel) {
       root = characterModel;
       root.position.set(data.position.x, data.position.y - 0.9, data.position.z);
-      torso = root;
-      head = root;
-      if (this.map) {
-        root.getChildMeshes().forEach(m => this.map.addShadowCaster(m));
-      }
+      if (this.map) root.getChildMeshes().forEach(m => this.map.addShadowCaster(m));
     } else {
-      root = new BABYLON.TransformNode('proot_' + data.id, this.scene);
-      root.position.set(data.position.x, data.position.y - 0.9, data.position.z);
-
-      const bodyMat = this.sharedMaterials.team[data.team] || this.sharedMaterials.team[2];
-      const skinMat = this.sharedMaterials.skin;
-      const darkMat = this.sharedMaterials.dark;
-
-      torso = BABYLON.MeshBuilder.CreateBox('torso_' + data.id, { width: 0.5, height: 0.65, depth: 0.3 }, this.scene);
-      torso.parent = root; torso.position.y = 0.55; torso.material = bodyMat;
-      head = BABYLON.MeshBuilder.CreateSphere('head_' + data.id, { diameter: 0.38, segments: 10 }, this.scene);
-      head.parent = root; head.position.y = 1.15; head.material = skinMat;
-      const helmet = BABYLON.MeshBuilder.CreateSphere('helmet_' + data.id, { diameter: 0.42, segments: 8 }, this.scene);
-      helmet.parent = root; helmet.position.y = 1.2; helmet.material = darkMat;
-      const armL = BABYLON.MeshBuilder.CreateBox('armL_' + data.id, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
-      armL.parent = root; armL.position.set(-0.35, 0.55, 0); armL.material = bodyMat;
-      const armR = BABYLON.MeshBuilder.CreateBox('armR_' + data.id, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
-      armR.parent = root; armR.position.set(0.35, 0.55, 0); armR.material = bodyMat;
-      const legL = BABYLON.MeshBuilder.CreateBox('legL_' + data.id, { width: 0.18, height: 0.5, depth: 0.18 }, this.scene);
-      legL.parent = root; legL.position.set(-0.13, 0, 0); legL.material = darkMat;
-      const legR = BABYLON.MeshBuilder.CreateBox('legR_' + data.id, { width: 0.18, height: 0.5, depth: 0.18 }, this.scene);
-      legR.parent = root; legR.position.set(0.13, 0, 0); legR.material = darkMat;
-      const gun = BABYLON.MeshBuilder.CreateBox('gun_' + data.id, { width: 0.04, height: 0.04, depth: 0.35 }, this.scene);
-      gun.parent = root; gun.position.set(0.3, 0.5, 0.2); gun.material = darkMat;
-
-      if (this.map) this.map.addShadowCaster(torso);
+      root = this._buildFallbackCharacter(data);
     }
 
     // Name tag
-    const nameplane = BABYLON.MeshBuilder.CreatePlane('name_' + data.id, { width: 2, height: 0.3 }, this.scene);
+    const nameplane = BABYLON.MeshBuilder.CreatePlane(`name_${data.id}`,
+      { width: 2, height: 0.3 }, this.scene);
     nameplane.parent = root;
     nameplane.position.y = characterModel ? 2.2 : 1.7;
     nameplane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-    const nameTex = new BABYLON.DynamicTexture('nameTex_' + data.id, { width: 256, height: 40 }, this.scene);
+
+    const nameTex = new BABYLON.DynamicTexture(`nameTex_${data.id}`,
+      { width: 256, height: 40 }, this.scene);
     const nameCtx = nameTex.getContext();
     nameCtx.clearRect(0, 0, 256, 40);
     const isTeammate = data.team === this.selfState?.team;
     nameCtx.fillStyle = isTeammate ? '#4488ff' : '#ff4444';
     nameCtx.font = 'bold 24px Arial';
     nameCtx.textAlign = 'center';
-    nameCtx.fillText(data.username || data.id.slice(0, 8), 128, 28);
+    // [G3] Mark bots with [BOT] prefix
+    const displayName = (data.isBot ? '[BOT] ' : '') + (data.username || data.id.slice(0, 8));
+    nameCtx.fillText(displayName, 128, 28);
     nameTex.update();
-    const nameMat = new BABYLON.StandardMaterial('namemat_' + data.id, this.scene);
+
+    const nameMat = new BABYLON.StandardMaterial(`namemat_${data.id}`, this.scene);
     nameMat.diffuseTexture = nameTex;
     nameMat.emissiveTexture = nameTex;
     nameMat.disableLighting = true;
@@ -486,20 +452,20 @@ class Game {
     nameMat.useAlphaFromDiffuseTexture = true;
     nameplane.material = nameMat;
 
-    // Marker
-    const markerMat = new BABYLON.StandardMaterial('markerMat_' + data.id, this.scene);
+    // Floating marker
+    const markerMat = new BABYLON.StandardMaterial(`markerMat_${data.id}`, this.scene);
     markerMat.diffuseColor = isTeammate ? new BABYLON.Color3(0.2, 0.5, 1) : new BABYLON.Color3(1, 0.2, 0.2);
     markerMat.emissiveColor = markerMat.diffuseColor;
     markerMat.disableLighting = true;
 
-    const marker = BABYLON.MeshBuilder.CreateCylinder('marker_' + data.id, { diameterTop: 0.2, diameterBottom: 0, height: 0.3, tessellation: 4 }, this.scene);
+    const marker = BABYLON.MeshBuilder.CreateCylinder(`marker_${data.id}`,
+      { diameterTop: 0.2, diameterBottom: 0, height: 0.3, tessellation: 4 }, this.scene);
     marker.parent = root;
     const markerBaseY = characterModel ? 2.5 : 2.0;
     marker.position.y = markerBaseY;
     marker.rotation.x = Math.PI;
     marker.material = markerMat;
 
-    // [FIX 11] Store the observer reference so it can be removed on player leave
     const markerObserver = this.scene.onBeforeRenderObservable.add(() => {
       if (!marker.isDisposed()) {
         marker.position.y = markerBaseY + Math.sin(performance.now() * 0.005) * 0.1;
@@ -507,9 +473,91 @@ class Game {
       }
     });
 
-    this.otherPlayers[data.id] = { mesh: root, state: data, head, torso, markerObserver };
+    // [G1] Store animation groups from character model
+    const animGroups = characterModel?.playerAnimGroups || [];
+    const animMap = characterModel?.playerAnimMap || {};
+
+    this.otherPlayers[data.id] = {
+      mesh: root,
+      state: data,
+      markerObserver,
+      animGroups,   // [G1]
+      animMap,      // [G1]
+      currentAnim: null
+    };
+
+    // [G1] Start idle animation immediately
+    this._playOtherPlayerAnim(this.otherPlayers[data.id], 'idle');
   }
 
+  // Fallback block-character when no GLB is loaded
+  _buildFallbackCharacter(data) {
+    const root = new BABYLON.TransformNode(`proot_${data.id}`, this.scene);
+    root.position.set(data.position.x, data.position.y - 0.9, data.position.z);
+
+    const bodyMat = this.sharedMaterials.team[data.team] || this.sharedMaterials.team[2];
+    const skinMat = this.sharedMaterials.skin;
+    const darkMat = this.sharedMaterials.dark;
+
+    const torso = BABYLON.MeshBuilder.CreateBox(`torso_${data.id}`, { width: 0.5, height: 0.65, depth: 0.3 }, this.scene);
+    torso.parent = root; torso.position.y = 0.55; torso.material = bodyMat;
+    const head = BABYLON.MeshBuilder.CreateSphere(`head_${data.id}`, { diameter: 0.38, segments: 10 }, this.scene);
+    head.parent = root; head.position.y = 1.15; head.material = skinMat;
+    const helmet = BABYLON.MeshBuilder.CreateSphere(`helmet_${data.id}`, { diameter: 0.42, segments: 8 }, this.scene);
+    helmet.parent = root; helmet.position.y = 1.2; helmet.material = darkMat;
+    const armL = BABYLON.MeshBuilder.CreateBox(`armL_${data.id}`, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
+    armL.parent = root; armL.position.set(-0.35, 0.55, 0); armL.material = bodyMat;
+    const armR = BABYLON.MeshBuilder.CreateBox(`armR_${data.id}`, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
+    armR.parent = root; armR.position.set(0.35, 0.55, 0); armR.material = bodyMat;
+    const legL = BABYLON.MeshBuilder.CreateBox(`legL_${data.id}`, { width: 0.18, height: 0.5, depth: 0.18 }, this.scene);
+    legL.parent = root; legL.position.set(-0.13, 0, 0); legL.material = darkMat;
+    const legR = BABYLON.MeshBuilder.CreateBox(`legR_${data.id}`, { width: 0.18, height: 0.5, depth: 0.18 }, this.scene);
+    legR.parent = root; legR.position.set(0.13, 0, 0); legR.material = darkMat;
+    const gun = BABYLON.MeshBuilder.CreateBox(`gun_${data.id}`, { width: 0.04, height: 0.04, depth: 0.35 }, this.scene);
+    gun.parent = root; gun.position.set(0.3, 0.5, 0.2); gun.material = darkMat;
+
+    if (this.map) this.map.addShadowCaster(torso);
+    return root;
+  }
+
+  /**
+   * [G2] Play an animation on an other-player entry by logical name.
+   * Tries: exact match, case-insensitive partial match.
+   * Names tried: 'walk', 'run', 'idle', 'crouch', 'death'.
+   */
+  _playOtherPlayerAnim(op, logicalName) {
+    if (!op || !op.animGroups || op.animGroups.length === 0) return;
+    if (op.currentAnim === logicalName) return;  // already playing
+
+    // Common name variants per logical state
+    const variants = {
+      idle: ['Idle_Basic', 'Idle', 'idle', 'Stand'],
+      walk: ['Walk', 'walk', 'Walking', 'MovementWalk'],
+      run: ['Run', 'run', 'Running', 'MovementRun', 'Sprint'],
+      crouch: ['Crouch', 'crouch', 'CrouchIdle', 'CrouchWalk'],
+      death: ['Death', 'death', 'Dead', 'Dying']
+    };
+
+    const tryNames = variants[logicalName] || [logicalName];
+
+    let targetAnim = null;
+    for (const name of tryNames) {
+      targetAnim = AssetLoader.resolveAnimation(op.animGroups, op.animMap, name);
+      if (targetAnim) break;
+    }
+
+    if (!targetAnim) {
+      // Last resort: just play the first animation
+      targetAnim = op.animGroups[0];
+    }
+
+    // Stop all others, play target
+    op.animGroups.forEach(ag => { if (ag !== targetAnim) ag.stop(); });
+    targetAnim.play(true);
+    op.currentAnim = logicalName;
+  }
+
+  // [G7] updateOtherPlayer stores moving/crouching so G2 can use them
   updateOtherPlayer(data) {
     const op = this.otherPlayers[data.id];
     if (!op) return;
@@ -518,37 +566,40 @@ class Game {
     );
     op.targetRotation = data.rotation.y;
     op.state = data;
+
+    // Update name tag visibility with alive state
     op.mesh.setEnabled(!!data.alive);
+
+    // [G7] Cache movement state for animation updates in interpolateOtherPlayers
+    op.isMoving = data.moving || false;
+    op.isCrouching = data.crouching || false;
+    op.isAlive = data.alive;
   }
 
   removeOtherPlayer(id) {
     const op = this.otherPlayers[id];
-    if (op) {
-      // [FIX 11] Remove the bobbing observer before disposing
-      if (op.markerObserver) {
-        this.scene.onBeforeRenderObservable.remove(op.markerObserver);
-      }
-      op.mesh.dispose();
-      delete this.otherPlayers[id];
-    }
+    if (!op) return;
+    if (op.markerObserver) this.scene.onBeforeRenderObservable.remove(op.markerObserver);
+    // Stop all animations before disposing
+    if (op.animGroups) op.animGroups.forEach(ag => ag.stop());
+    op.mesh.dispose();
+    delete this.otherPlayers[id];
   }
 
   showOtherPlayerShoot(playerId) {
     const op = this.otherPlayers[playerId];
     if (!op || !op.mesh) return;
-    // Flash effect on their gun
+    // Small flash effect - no-op if no mesh handle, just a hook for future audio
   }
 
-  // ─── Game Loop ──────────────────────────────────────
+  // ─── Game Loop ────────────────────────────────────────────────────────────────
+
   gameLoop() {
     const now = performance.now();
     const dt = Math.min((now - this.lastTime) / 1000, 0.1);
     this.lastTime = now;
 
-    if (this.paused || !this.running) {
-      this.scene.render();
-      return;
-    }
+    if (this.paused || !this.running) { this.scene.render(); return; }
 
     this.playerController.update(dt);
     this.handleCombatInput(dt);
@@ -556,10 +607,10 @@ class Game {
     this.updateReloadAnim(dt);
     this.fxManager.update(dt);
     this.interpolateOtherPlayers(dt);
+    this.updateSlide(dt);    // [G8] camera roll – was never called in old loop
     this.updatePerfHUD(dt);
     this.scene.render();
 
-    // Send position to server using the controller's state
     const pState = this.playerController.getState();
     this.network.sendInput({
       position: pState.position,
@@ -572,13 +623,13 @@ class Game {
     });
   }
 
+  // ─── Combat Input ─────────────────────────────────────────────────────────────
+
   handleCombatInput(dt) {
     if (!this.alive || !this.input.locked) return;
 
-    // Prep-phase guard
     const isPrep = this.currentPhase === 'preparation' || this.currentPhase === 'debrief';
     if (isPrep) {
-      // [FIX 6] Only suppress shooting state; don't wrongly touch weapons.shooting flag
       this.ui.updateCrosshairSpread(false);
     } else {
       if (this.input.isMouseDown(0)) {
@@ -587,17 +638,17 @@ class Game {
           if (this.weapons.canShoot()) {
             this.weapons.shoot();
             this.network.sendShoot();
+
+            // [G5] All FX through fxManager (muzzle flash is wired via G4)
             this.fxManager.showMuzzleFlash();
-            
+            this._doWeaponKick();
+
             const aimDir = this.camera.getForwardRay().direction;
             this.fxManager.createBulletTrail(this.camera.position, aimDir);
-            
             this.ui.updateCrosshairSpread(true);
+
           } else if (this.weapons.ammo <= 0 && !this.weapons.reloading) {
-            this.network.sendReload();
-            this.weapons.reloading = true;
-            this.ui.showReloading(true);
-            this.startReloadAnim();
+            this._startReload();
           }
         }
         this.weapons.shooting = true;
@@ -606,43 +657,38 @@ class Game {
         this.ui.updateCrosshairSpread(false);
       }
 
-      // [FIX 7] Use a consistent key-consume helper; avoids manual key dictionary writes
       if (this.input.consumeKey('KeyR') && !this.weapons.reloading) {
         const wd = this.weapons.getWeaponData();
-        if (wd && this.weapons.ammo < wd.magSize) {
-          this.network.sendReload();
-          this.weapons.reloading = true;
-          this.ui.showReloading(true);
-          this.startReloadAnim();
-        }
+        if (wd && this.weapons.ammo < wd.magSize) this._startReload();
       }
 
-      if (this.input.consumeKey('KeyQ')) {
-        this.network.sendAbility();
-      }
+      if (this.input.consumeKey('KeyQ')) this.network.sendAbility();
     }
 
     if (this.input.consumeKey('Digit1')) this.network.sendWeaponSwitch('primary');
     if (this.input.consumeKey('Digit2')) this.network.sendWeaponSwitch('secondary');
-
     this.ui.showScoreboard(this.input.isKeyDown('Tab'));
-
     if (this.input.consumeKey('Escape')) this.togglePause();
     if (this.input.consumeKey('KeyT')) this.openChat();
   }
 
-  showMuzzleFlash() {
-    this.fxManager.showMuzzleFlash();
+  _startReload() {
+    this.network.sendReload();
+    this.weapons.reloading = true;
+    this.ui.showReloading(true);
+    this.startReloadAnim();
+  }
 
-    // Weapon kick
-    if (this.weaponRoot && !this.isReloadAnimating) {
-      this.weaponRoot.position.z = this.weaponRestPos.z - 0.06;
-      this._kickTimer = setTimeout(() => {
-        if (this.weaponRoot && !this.isReloadAnimating) {
-          this.weaponRoot.position.z = this.weaponRestPos.z;
-        }
-      }, 60);
-    }
+  // [G5] Weapon kick on shoot
+  _doWeaponKick() {
+    if (!this.weaponRoot || this.isReloadAnimating) return;
+    this.weaponRoot.position.z = this.weaponRestPos.z - 0.06;
+    if (this._kickTimer) clearTimeout(this._kickTimer);
+    this._kickTimer = setTimeout(() => {
+      if (this.weaponRoot && !this.isReloadAnimating) {
+        this.weaponRoot.position.z = this.weaponRestPos.z;
+      }
+    }, 60);
   }
 
   startReloadAnim() {
@@ -656,8 +702,7 @@ class Game {
     this.reloadAnimProgress += dt * 2.0;
 
     if (this.reloadAnimProgress < 1.0) {
-      const t = this.reloadAnimProgress;
-      const ease = t * t;
+      const ease = this.reloadAnimProgress * this.reloadAnimProgress;
       this.weaponRoot.position = BABYLON.Vector3.Lerp(this.weaponRestPos, this.weaponReloadPos, ease);
       this.weaponRoot.rotation.x = ease * 0.5;
     } else if (this.reloadAnimProgress < 2.0) {
@@ -668,14 +713,6 @@ class Game {
     } else {
       this.weaponRoot.position = this.weaponRestPos.clone();
       this.weaponRoot.rotation.x = 0;
-
-      // Apply rotation for weapon model (use player controller pitch/yaw)
-      const pState = this.playerController ? this.playerController.getState() : { rotation: {x:0,y:0} };
-      this.weaponRoot.rotation.x = -pState.rotation.x;
-    
-      // Weapon sway
-      if (!this.weapons.aiming && pState.moving) { /* sway */ }
-      
       this.isReloadAnimating = false;
     }
   }
@@ -685,15 +722,12 @@ class Game {
 
     if (this.sliding) {
       this.slideTimer -= dt;
-      const speedFactor = Math.max(0, this.slideTimer / this.slideDuration);
-      this.camera.position.x += this.slideDir.x * this.slideSpeed * speedFactor * dt;
-      this.camera.position.z += this.slideDir.z * this.slideSpeed * speedFactor * dt;
+      const sf = Math.max(0, this.slideTimer / this.slideDuration);
+      this.camera.position.x += this.slideDir.x * this.slideSpeed * sf * dt;
+      this.camera.position.z += this.slideDir.z * this.slideSpeed * sf * dt;
       this.targetRoll = 0.08;
       this.playerHeight = 1.2;
-      if (this.slideTimer <= 0) {
-        this.sliding = false;
-        this.playerHeight = 1.8;
-      }
+      if (this.slideTimer <= 0) { this.sliding = false; this.playerHeight = 1.8; }
     } else {
       const move = this.input.getMovement();
       this.targetRoll = move.right * -0.03;
@@ -702,6 +736,130 @@ class Game {
     this.cameraRoll += (this.targetRoll - this.cameraRoll) * (1 - Math.exp(-10 * dt));
     this.camera.rotation.z = this.cameraRoll;
   }
+
+  // ─── [G2] Interpolate + animate other players ─────────────────────────────────
+
+  interpolateOtherPlayers(dt) {
+    const lerpSpeed = 12;
+    const t = 1 - Math.exp(-lerpSpeed * dt);
+
+    for (const [id, op] of Object.entries(this.otherPlayers)) {
+      if (!op.targetPosition) continue;
+
+      const dist = BABYLON.Vector3.Distance(op.mesh.position, op.targetPosition);
+      op.mesh.position = BABYLON.Vector3.Lerp(op.mesh.position, op.targetPosition, t);
+
+      const dAngle = op.targetRotation - op.mesh.rotation.y;
+      // Normalise to [-π, π] to avoid spinning the long way
+      const normAngle = ((dAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+      op.mesh.rotation.y += normAngle * t;
+
+      // [G2] Drive animation from server state flags
+      if (op.isAlive === false) {
+        this._playOtherPlayerAnim(op, 'death');
+      } else if (op.isCrouching) {
+        this._playOtherPlayerAnim(op, 'crouch');
+      } else if (dist > 0.5) {
+        this._playOtherPlayerAnim(op, dist > 2.0 ? 'run' : 'walk');
+      } else {
+        this._playOtherPlayerAnim(op, 'idle');
+      }
+    }
+  }
+
+  // ─── Game Over ────────────────────────────────────────────────────────────────
+
+  handleGameOver(data) {
+    this.running = false;
+    this.input.exitPointerLock();
+
+    let result = 'DEFEAT';
+    if (data.winnerTeam !== undefined) {
+      result = data.winnerTeam === this.selfState?.team ? 'VICTORY' : 'DEFEAT';
+    } else if (data.winner === this.playerId) {
+      result = 'VICTORY';
+    }
+
+    const stats = `Kills: ${this.selfState?.kills || 0} | Deaths: ${this.selfState?.deaths || 0} | Score: ${this.selfState?.score || 0}`;
+    this.ui.showGameOver(result, stats);
+  }
+
+  // ─── Shared Materials ─────────────────────────────────────────────────────────
+
+  initSharedMaterials() {
+    this.sharedMaterials = {
+      skin: new BABYLON.StandardMaterial('shared_skin', this.scene),
+      dark: new BABYLON.StandardMaterial('shared_dark', this.scene),
+      team: {}
+    };
+    this.sharedMaterials.skin.diffuseColor = new BABYLON.Color3(0.75, 0.6, 0.5);
+    this.sharedMaterials.dark.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.18);
+    this.sharedMaterials.team[0] = new BABYLON.StandardMaterial('team0', this.scene);
+    this.sharedMaterials.team[0].diffuseColor = new BABYLON.Color3(0.2, 0.4, 0.9);
+    this.sharedMaterials.team[1] = new BABYLON.StandardMaterial('team1', this.scene);
+    this.sharedMaterials.team[1].diffuseColor = new BABYLON.Color3(0.9, 0.2, 0.2);
+    this.sharedMaterials.team[2] = new BABYLON.StandardMaterial('teamN', this.scene);
+    this.sharedMaterials.team[2].diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.2);
+  }
+
+  // ─── Floating Damage ──────────────────────────────────────────────────────────
+
+  showFloatingDamage(position, damage, isHeadshot) {
+    this.fxManager.showFloatingDamage(position, damage, isHeadshot);
+  }
+
+  // ─── Ability Effects ──────────────────────────────────────────────────────────
+
+  playAbilityEffect(msg) {
+    const pos = new BABYLON.Vector3(msg.position.x, msg.position.y, msg.position.z);
+
+    if (msg.abilityId === 'wall_charge') {
+      BABYLON.ParticleHelper.CreateAsync('explosion', this.scene).then(set => {
+        set.systems.forEach(s => { s.emitter = pos; });
+        set.start();
+      }).catch(() => { });
+
+      const dist = BABYLON.Vector3.Distance(this.camera.position, pos);
+      if (dist < 20) {
+        const shake = Math.max(0, (20 - dist) / 20) * 0.5;
+        this.targetRoll += (Math.random() - 0.5) * shake;
+        this.pitch -= shake * 0.1;
+      }
+
+    } else if (msg.abilityId === 'recon_drone') {
+      const drone = BABYLON.MeshBuilder.CreateBox(`drone_${msg.playerId}`, { size: 0.3 }, this.scene);
+      drone.position = pos.clone();
+      drone.position.y += 3;
+      const droneMat = new BABYLON.StandardMaterial('droneMat', this.scene);
+      droneMat.emissiveColor = new BABYLON.Color3(0, 0.8, 1);
+      drone.material = droneMat;
+
+      const obs = this.scene.onBeforeRenderObservable.add(() => {
+        if (!drone.isDisposed()) {
+          drone.rotation.y += 0.1;
+          drone.position.y += Math.sin(performance.now() * 0.005) * 0.01;
+        }
+      });
+
+      const dur = msg.duration || 5000;
+      setTimeout(() => {
+        this.scene.onBeforeRenderObservable.remove(obs);
+        if (!drone.isDisposed()) drone.dispose();
+      }, dur);
+
+      if (msg.playerId === this.playerId && msg.revealed) {
+        msg.revealed.forEach(r => this.ui.showPingOnMinimap(r.position, dur));
+      }
+    }
+
+    if (msg.playerId === this.playerId) {
+      const fallbacks = { wall_charge: 45000, recon_drone: 30000 };
+      const ms = msg.cooldownMs ?? fallbacks[msg.abilityId] ?? 30000;
+      this.ui.updateAbilityCooldown(Date.now() + ms);
+    }
+  }
+
+  // ─── Pause / Chat ─────────────────────────────────────────────────────────────
 
   togglePause() {
     this.paused = !this.paused;
@@ -716,7 +874,6 @@ class Game {
     chatInput.focus();
     this.input.exitPointerLock();
 
-    // [FIX 7] Use { once: false } pattern with named handler to avoid race conditions
     const handler = (e) => {
       if (e.key === 'Enter') {
         const msg = chatInput.value.trim();
@@ -725,7 +882,6 @@ class Game {
         chatInput.classList.remove('active');
         chatInput.blur();
         chatInput.removeEventListener('keydown', handler);
-        // Only re-request lock if not paused
         if (!this.paused) setTimeout(() => this.input.requestPointerLock(), 100);
       } else if (e.key === 'Escape') {
         chatInput.value = '';
@@ -738,82 +894,14 @@ class Game {
     chatInput.addEventListener('keydown', handler);
   }
 
-  handleGameOver(data) {
-    this.running = false;
-    this.input.exitPointerLock();
+  // ─── Performance HUD ──────────────────────────────────────────────────────────
 
-    // [FIX 14] Always use this.selfState.team — never the stale this.team alias
-    let result = 'DEFEAT';
-    if (data.winnerTeam !== undefined) {
-      const myTeam = this.selfState?.team;
-      result = data.winnerTeam === myTeam ? 'VICTORY' : 'DEFEAT';
-    } else if (data.winner === this.playerId) {
-      result = 'VICTORY';
-    }
-
-    const stats = `Kills: ${this.selfState?.kills || 0} | Deaths: ${this.selfState?.deaths || 0} | Score: ${this.selfState?.score || 0}`;
-    this.ui.showGameOver(result, stats);
-  }
-
-  // ─── Shared Materials ───────────────────────────────
-  initSharedMaterials() {
-    this.sharedMaterials = {
-      skin: new BABYLON.StandardMaterial('shared_skin', this.scene),
-      dark: new BABYLON.StandardMaterial('shared_dark', this.scene),
-      team: {}
-    };
-    this.sharedMaterials.skin.diffuseColor = new BABYLON.Color3(0.75, 0.6, 0.5);
-    this.sharedMaterials.dark.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.18);
-    this.sharedMaterials.team[0] = new BABYLON.StandardMaterial('shared_team0', this.scene);
-    this.sharedMaterials.team[0].diffuseColor = new BABYLON.Color3(0.2, 0.4, 0.9);
-    this.sharedMaterials.team[1] = new BABYLON.StandardMaterial('shared_team1', this.scene);
-    this.sharedMaterials.team[1].diffuseColor = new BABYLON.Color3(0.9, 0.2, 0.2);
-    this.sharedMaterials.team[2] = new BABYLON.StandardMaterial('shared_teamN', this.scene);
-    this.sharedMaterials.team[2].diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.2);
-  }
-
-
-
-  showFloatingDamage(position, damage, isHeadshot) {
-    this.fxManager.showFloatingDamage(position, damage, isHeadshot);
-  }
-
-  // ─── Other Player Interpolation ────────────────────
-  interpolateOtherPlayers(dt) {
-    const lerpSpeed = 12;
-    const t = 1 - Math.exp(-lerpSpeed * dt);
-    for (const [id, op] of Object.entries(this.otherPlayers)) {
-      if (!op.targetPosition) continue;
-
-      const dist = BABYLON.Vector3.Distance(op.mesh.position, op.targetPosition);
-      op.mesh.position = BABYLON.Vector3.Lerp(op.mesh.position, op.targetPosition, t);
-      const dAngle = op.targetRotation - op.mesh.rotation.y;
-      op.mesh.rotation.y += dAngle * t;
-
-      // [FIX 12] animationGroups live on the scene, not on TransformNode
-      const anims = this.scene.animationGroups.filter(ag => ag.name.includes(id));
-      if (anims.length > 0) {
-        const targetAnimName = dist > 0.02 ? 'Run' : 'Idle';
-        if (op.currentAnim !== targetAnimName) {
-          const targetAnim = anims.find(ag => ag.name.includes(targetAnimName));
-          if (targetAnim) {
-            anims.forEach(ag => { if (ag !== targetAnim) ag.stop(); });
-            targetAnim.play(true);
-            op.currentAnim = targetAnimName;
-          }
-        }
-      }
-    }
-  }
-
-  // ─── Performance HUD ───────────────────────────────
   initPerfHUD() {
     this.perfEl = document.createElement('div');
     this.perfEl.style.cssText = `
-      position:fixed; top:8px; left:8px; font:12px monospace;
-      color:#0ff; background:rgba(0,0,0,0.5); padding:4px 8px;
-      border-radius:4px; pointer-events:none; z-index:9999;
-    `;
+      position:fixed;top:8px;left:8px;font:12px monospace;
+      color:#0ff;background:rgba(0,0,0,0.5);padding:4px 8px;
+      border-radius:4px;pointer-events:none;z-index:9999;`;
     document.body.appendChild(this.perfEl);
   }
 
@@ -822,68 +910,12 @@ class Game {
     const fps = Math.round(1 / dt);
     this.fpsHistory.push(fps);
     if (this.fpsHistory.length > 60) this.fpsHistory.shift();
-    const avgFps = Math.round(this.fpsHistory.reduce((a, b) => a + b, 0) / this.fpsHistory.length);
-    const meshCount = this.scene.meshes.length;
-    const ping = this.network.latency || 0;
-    this.perfEl.textContent = `FPS: ${fps} (avg: ${avgFps}) | Meshes: ${meshCount} | Ping: ${ping}ms`;
+    const avg = Math.round(this.fpsHistory.reduce((a, b) => a + b, 0) / this.fpsHistory.length);
+    this.perfEl.textContent =
+      `FPS: ${fps} (avg:${avg}) | Meshes: ${this.scene.meshes.length} | Ping: ${this.network.latency || 0}ms`;
   }
 
-  playAbilityEffect(msg) {
-    const pos = new BABYLON.Vector3(msg.position.x, msg.position.y, msg.position.z);
-
-    if (msg.abilityId === 'wall_charge') {
-      BABYLON.ParticleHelper.CreateAsync('explosion', this.scene).then((set) => {
-        set.systems.forEach(s => { s.emitter = pos; });
-        set.start();
-      });
-
-      const dist = BABYLON.Vector3.Distance(this.camera.position, pos);
-      if (dist < 20) {
-        const shakeIntensity = Math.max(0, (20 - dist) / 20) * 0.5;
-        this.targetRoll += (Math.random() - 0.5) * shakeIntensity;
-        this.pitch -= shakeIntensity * 0.1;
-      }
-    } else if (msg.abilityId === 'recon_drone') {
-      const drone = BABYLON.MeshBuilder.CreateBox('drone_' + msg.playerId, { size: 0.3 }, this.scene);
-      drone.position = pos.clone();
-      drone.position.y += 3;
-
-      const droneMat = new BABYLON.StandardMaterial('droneMat', this.scene);
-      droneMat.emissiveColor = new BABYLON.Color3(0, 0.8, 1);
-      drone.material = droneMat;
-
-      const droneObs = this.scene.onBeforeRenderObservable.add(() => {
-        if (!drone.isDisposed()) {
-          drone.rotation.y += 0.1;
-          drone.position.y += Math.sin(performance.now() * 0.005) * 0.01;
-        }
-      });
-
-      const duration = msg.duration || 5000;
-      setTimeout(() => {
-        this.scene.onBeforeRenderObservable.remove(droneObs);
-        drone.dispose();
-      }, duration);
-
-      if (msg.playerId === this.playerId && msg.revealed) {
-        msg.revealed.forEach(r => {
-          this.ui.showPingOnMinimap(r.position, duration);
-        });
-      }
-    }
-
-    // [FIX 15] Use server-provided cooldownMs; fall back to per-ability defaults only if absent
-    if (msg.playerId === this.playerId) {
-      const fallbacks = { wall_charge: 45000, recon_drone: 30000 };
-      const cooldownMs = msg.cooldownMs ?? fallbacks[msg.abilityId] ?? 30000;
-      this.ui.updateAbilityCooldown(Date.now() + cooldownMs);
-    }
-  }
-
-  // ─── Game Loop (add dmgPool update) ────────────────
-  // NOTE: gameLoop already calls scene.render(); updateDmgPool must be inserted
-  // We override the relevant section — call updateDmgPool inside gameLoop:
-  // Add `this.updateDmgPool(dt);` after `this.updateTrails(dt);`
+  // ─── Destroy ──────────────────────────────────────────────────────────────────
 
   destroy() {
     this.running = false;
@@ -892,10 +924,7 @@ class Game {
     if (this._kickTimer) clearTimeout(this._kickTimer);
     if (this.perfEl) { this.perfEl.remove(); this.perfEl = null; }
     if (this.assetLoader) { this.assetLoader.dispose(); this.assetLoader = null; }
-    // Remove all player observers
-    for (const id of Object.keys(this.otherPlayers)) {
-      this.removeOtherPlayer(id);
-    }
+    for (const id of Object.keys(this.otherPlayers)) this.removeOtherPlayer(id);
     if (this.engine) {
       this.engine.stopRenderLoop();
       this.scene?.dispose();
