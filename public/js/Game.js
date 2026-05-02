@@ -584,8 +584,7 @@ class Game {
     const move = this.input.getMovement();
     const isMoving = move.forward !== 0 || move.right !== 0;
 
-    // [FIX 4] Compute moveYaw BEFORE the slide-initiation block needs it
-    const moveYaw = -this.yaw;
+    const moveYaw = this.yaw;
 
     // Slide initiation
     if (this.input.isKeyDown('ShiftLeft') && this.grounded && isMoving && !this.sliding && this.slideCooldown <= 0) {
