@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Browser-based multiplayer FPS game with real-time combat, multiple game modes, and progression system">
-  <title>WARZONE ONLINE | Multiplayer FPS</title>
+  <title>URBAN SIEGE | Tactical FPS</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,9 +26,9 @@
     <div class="auth-bg"></div>
     <div class="auth-container">
       <div class="auth-logo">
-        <div class="logo-icon">⚔</div>
-        <h1 class="logo-title">WARZONE</h1>
-        <p class="logo-subtitle">ONLINE COMBAT</p>
+        <div class="logo-icon">🏢</div>
+        <h1 class="logo-title">URBAN SIEGE</h1>
+        <p class="logo-subtitle">TACTICAL OPERATIONS</p>
       </div>
 
       <div class="auth-card" id="auth-card">
@@ -76,7 +76,7 @@
 
     <div class="lobby-header">
       <div class="lobby-branding">
-        <span class="lobby-logo">⚔ WARZONE</span>
+        <span class="lobby-logo">🏢 URBAN SIEGE</span>
       </div>
       <div class="lobby-user-info" id="lobby-user-info">
         <div class="user-level" id="user-level-badge">LV 1</div>
@@ -92,6 +92,13 @@
       <div class="lobby-left">
         <h2 class="section-title">ARMORY</h2>
         <div class="loadout-panel" id="loadout-panel">
+          <div class="loadout-slot" id="operative-slot">
+            <span class="slot-label">OPERATIVE</span>
+            <select id="operative-select" class="weapon-select" onchange="updateOperative()">
+              <option value="vega">VEGA (Breacher)</option>
+              <option value="prism">PRISM (Recon)</option>
+            </select>
+          </div>
           <div class="loadout-slot" id="primary-slot">
             <span class="slot-label">PRIMARY</span>
             <select id="primary-select" class="weapon-select" onchange="updateLoadout()"></select>
@@ -136,6 +143,7 @@
           <div class="create-room-form">
             <input type="text" id="room-name-input" placeholder="Room Name" maxlength="30">
             <select id="room-mode-select" class="weapon-select">
+              <option value="plant_defuse">Plant & Defuse</option>
               <option value="tdm">Team Deathmatch</option>
               <option value="ffa">Free For All</option>
               <option value="snd">Search & Destroy</option>
@@ -242,11 +250,23 @@
       <!-- Reload Indicator -->
       <div id="reload-indicator" class="reload-indicator">RELOADING...</div>
 
+      <!-- Ability Indicator -->
+      <div id="ability-indicator" class="ability-indicator">
+        <div class="ability-icon" id="ability-icon">Q</div>
+        <div class="ability-cooldown-arc" id="ability-cooldown-arc"></div>
+      </div>
+
       <!-- Death Screen -->
       <div id="death-screen" class="death-screen">
         <h2>ELIMINATED</h2>
         <p>Killed by <span id="killed-by">Enemy</span></p>
         <p class="respawn-timer">Respawning in <span id="respawn-countdown">3</span>s</p>
+      </div>
+
+      <!-- Phase Banner -->
+      <div id="phase-banner" class="phase-banner">
+        <div id="phase-title" class="phase-title">PREPARATION</div>
+        <div id="phase-timer" class="phase-timer">0:45</div>
       </div>
 
       <!-- Scoreboard (TAB) -->

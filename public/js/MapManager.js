@@ -8,13 +8,93 @@ class MapManager {
     this.obstacles = [];
   }
 
-  buildMap(mapData) {
-    this.createGround(mapData);
-    this.createWalls(mapData);
-    this.createObstacles(mapData);
+  buildMap(mapData, assetLoader) {
+    this.assetLoader = assetLoader;
+    if (mapData.theme === 'downtown') {
+      this.buildCityMap(mapData);
+    } else {
+      this.createGround(mapData);
+      this.createWalls(mapData);
+      this.createObstacles(mapData);
+      this.createDetails(mapData);
+    }
     this.createLighting();
     this.createSkybox();
-    this.createDetails(mapData);
+  }
+
+  buildCityMap(mapData) {
+    if (!this.assetLoader) return;
+
+    // Ground plane
+    const size = mapData.size || { x: 70, z: 70 };
+    const ground = BABYLON.MeshBuilder.CreateGround('cityGround', { width: size.x, height: size.z, subdivisions: 2 }, this.scene);
+    const mat = new BABYLON.StandardMaterial('groundMat', this.scene);
+    mat.diffuseColor = new BABYLON.Color3(0.12, 0.12, 0.12);
+    mat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+    ground.material = mat;
+    ground.receiveShadows = true;
+    ground.checkCollisions = true;
+    this.meshes.push(ground);
+
+    // Place buildings using obstacles data
+    if (mapData.obstacles) {
+      mapData.obstacles.forEach((obs, i) => {
+        const cx = (obs.min.x + obs.max.x) / 2;
+        const cz = (obs.min.z + obs.max.z) / 2;
+        
+        let buildingType = 'building_A';
+        if (obs.height >= 15) buildingType = 'building_G'; // Tall corner
+        else if (obs.height >= 12) buildingType = 'building_D'; // A-site
+        else if (obs.height >= 10) buildingType = 'building_C';
+        else if (obs.height >= 8) buildingType = 'building_B';
+        else if (obs.height >= 6) buildingType = 'building_E';
+        
+        // If it's the center vehicle cover
+        if (obs.height < 5) {
+          const car = this.assetLoader.placeMapPiece('car_police', new BABYLON.Vector3(cx - 2, 0, cz));
+          const taxi = this.assetLoader.placeMapPiece('car_taxi', new BABYLON.Vector3(cx + 2, 0, cz));
+          if (car) { car.rotation.y = Math.PI / 4; this.addShadowCaster(car); }
+          if (taxi) { taxi.rotation.y = -Math.PI / 6; this.addShadowCaster(taxi); }
+        } else {
+          // It's a building
+          const mesh = this.assetLoader.placeMapPiece(buildingType, new BABYLON.Vector3(cx, 0, cz));
+          if (mesh) {
+            // Rotate some buildings
+            mesh.rotation.y = (Math.PI / 2) * (i % 4);
+            this.addShadowCaster(mesh);
+          }
+        }
+
+        // Invisible collision box
+        const w = obs.max.x - obs.min.x;
+        const d = obs.max.z - obs.min.z;
+        const box = BABYLON.MeshBuilder.CreateBox('col_' + i, { width: w, height: obs.height, depth: d }, this.scene);
+        box.position.set(cx, obs.height / 2, cz);
+        box.isVisible = false;
+        box.checkCollisions = true;
+      });
+    }
+
+    // Place RPG Props at Bomb Site B
+    if (mapData.bombSites && mapData.bombSites.B) {
+      const pos = mapData.bombSites.B;
+      this.assetLoader.placeRPGProp('anvil', new BABYLON.Vector3(pos.x, 0, pos.z));
+      this.assetLoader.placeRPGProp('lantern', new BABYLON.Vector3(pos.x + 2, 0, pos.z + 1));
+      this.assetLoader.placeRPGProp('tool_wood_A', new BABYLON.Vector3(pos.x - 2, 0, pos.z - 1));
+    }
+
+    // Place Roads
+    for (let x = -20; x <= 20; x += 10) {
+      this.assetLoader.placeMapPiece('road_straight', new BABYLON.Vector3(x, 0, 10));
+      this.assetLoader.placeMapPiece('road_straight', new BABYLON.Vector3(x, 0, -10));
+    }
+
+    // Create markers
+    if (mapData.bombSites) {
+      Object.entries(mapData.bombSites).forEach(([name, pos]) => {
+        this.createZoneMarker(name, pos, new BABYLON.Color3(0.8, 0.2, 0.0));
+      });
+    }
   }
 
   createGround(mapData) {

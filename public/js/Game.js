@@ -114,9 +114,7 @@ class Game {
     this.camera.applyGravity = true;
     this.scene.activeCamera = this.camera;
 
-    // Build map
-    this.map = new MapManager(this.scene);
-    this.map.buildMap(this.mapData);
+    this.scene.activeCamera = this.camera;
 
     // Graphics settings
     this.graphics = new GraphicsSettings(this.scene, this.engine);
@@ -136,6 +134,10 @@ class Game {
       if (tipEl) tipEl.textContent = label;
     };
     await this.assetLoader.preloadAll();
+
+    // Build map (needs assetLoader for City Builder tiles)
+    this.map = new MapManager(this.scene);
+    this.map.buildMap(this.mapData, this.assetLoader);
 
     // Create weapon viewmodel (GLB blaster or fallback boxes)
     this.createWeaponModel();
@@ -356,6 +358,28 @@ class Game {
         });
       }
     });
+
+    net.on('ability_effect', (msg) => {
+      this.playAbilityEffect(msg);
+    });
+
+    net.on('ability_failed', (msg) => {
+      if (msg.reason === 'cooldown') {
+        this.ui.updateAbilityCooldown(Date.now() + msg.remaining);
+      }
+    });
+
+    net.on('game_event', (msg) => {
+      if (msg.event?.type === 'game_over') {
+        this.handleGameOver(msg.event);
+      } else if (msg.event?.type === 'phase_change') {
+        this.currentPhase = msg.event.phase;
+        this.ui.showPhaseBanner(msg.event.phase, msg.event.timeLimit, msg.event.round);
+      } else if (msg.event?.type === 'round_end') {
+        const text = msg.event.winnerTeam === this.team ? "ROUND WON" : "ROUND LOST";
+        this.ui.showPhaseBanner("DEBRIEF", 15, text);
+      }
+    });
   }
 
   // ─── Other Players ──────────────────────────────────
@@ -559,37 +583,53 @@ class Game {
     this.camera.position.x = Math.max(-halfX, Math.min(halfX, this.camera.position.x));
     this.camera.position.z = Math.max(-halfZ, Math.min(halfZ, this.camera.position.z));
 
-    // Shooting
-    if (this.input.isMouseDown(0)) {
-      const wd = this.weapons.getWeaponData();
-      if (wd && (wd.auto || !this.weapons.shooting)) {
-        if (this.weapons.canShoot()) {
-          this.weapons.shoot();
-          this.network.sendShoot();
-          this.showMuzzleFlash();
-          this.ui.updateCrosshairSpread(true);
-        } else if (this.weapons.ammo <= 0 && !this.weapons.reloading) {
+    this.camera.position.x = Math.max(-halfX, Math.min(halfX, this.camera.position.x));
+    this.camera.position.z = Math.max(-halfZ, Math.min(halfZ, this.camera.position.z));
+
+    // Disable weapons/abilities if not in engagement phase for plant_defuse
+    const isPrep = this.currentPhase === 'preparation' || this.currentPhase === 'debrief';
+    if (isPrep) {
+      this.weapons.shooting = false;
+      this.ui.updateCrosshairSpread(false);
+    } else {
+      // Shooting
+      if (this.input.isMouseDown(0)) {
+        const wd = this.weapons.getWeaponData();
+        if (wd && (wd.auto || !this.weapons.shooting)) {
+          if (this.weapons.canShoot()) {
+            this.weapons.shoot();
+            this.network.sendShoot();
+            this.showMuzzleFlash();
+            this.ui.updateCrosshairSpread(true);
+          } else if (this.weapons.ammo <= 0 && !this.weapons.reloading) {
+            this.network.sendReload();
+            this.weapons.reloading = true;
+            this.ui.showReloading(true);
+            this.startReloadAnim();
+          }
+        }
+        this.weapons.shooting = true;
+      } else {
+        this.weapons.shooting = false;
+        this.ui.updateCrosshairSpread(false);
+      }
+
+      // Reload with animation
+      if (this.input.isKeyDown('KeyR') && !this.weapons.reloading) {
+        this.input.keys['KeyR'] = false;
+        const wd = this.weapons.getWeaponData();
+        if (wd && this.weapons.ammo < wd.magSize) {
           this.network.sendReload();
           this.weapons.reloading = true;
           this.ui.showReloading(true);
           this.startReloadAnim();
         }
       }
-      this.weapons.shooting = true;
-    } else {
-      this.weapons.shooting = false;
-      this.ui.updateCrosshairSpread(false);
-    }
 
-    // Reload with animation
-    if (this.input.isKeyDown('KeyR') && !this.weapons.reloading) {
-      this.input.keys['KeyR'] = false;
-      const wd = this.weapons.getWeaponData();
-      if (wd && this.weapons.ammo < wd.magSize) {
-        this.network.sendReload();
-        this.weapons.reloading = true;
-        this.ui.showReloading(true);
-        this.startReloadAnim();
+      // Ability
+      if (this.input.isKeyDown('KeyQ')) {
+        this.input.keys['KeyQ'] = false;
+        this.network.sendAbility();
       }
     }
 
@@ -847,6 +887,61 @@ class Game {
     const ping = this.network.latency || 0;
     this.perfEl.textContent =
       `FPS: ${fps} (avg: ${avgFps}) | Meshes: ${meshCount} | Ping: ${ping}ms`;
+  }
+
+  playAbilityEffect(msg) {
+    const pos = new BABYLON.Vector3(msg.position.x, msg.position.y, msg.position.z);
+    
+    if (msg.abilityId === 'wall_charge') {
+      // Explosion VFX
+      BABYLON.ParticleHelper.CreateAsync("explosion", this.scene).then((set) => {
+        set.systems.forEach(s => {
+          s.emitter = pos;
+        });
+        set.start();
+      });
+      
+      // Camera shake if near
+      const dist = BABYLON.Vector3.Distance(this.camera.position, pos);
+      if (dist < 20) {
+        const shakeIntensity = Math.max(0, (20 - dist) / 20) * 0.5;
+        this.targetRoll += (Math.random() - 0.5) * shakeIntensity;
+        this.pitch -= shakeIntensity * 0.1;
+      }
+    } 
+    else if (msg.abilityId === 'recon_drone') {
+      // Visual drone
+      const drone = BABYLON.MeshBuilder.CreateBox('drone_' + msg.playerId, {size: 0.3}, this.scene);
+      drone.position = pos.clone();
+      drone.position.y += 3;
+      
+      const droneMat = new BABYLON.StandardMaterial('droneMat', this.scene);
+      droneMat.emissiveColor = new BABYLON.Color3(0, 0.8, 1);
+      drone.material = droneMat;
+      
+      // Animate drone up and spin
+      this.scene.onBeforeRenderObservable.add(() => {
+        if (!drone.isDisposed()) {
+          drone.rotation.y += 0.1;
+          drone.position.y += Math.sin(performance.now() * 0.005) * 0.01;
+        }
+      });
+      
+      setTimeout(() => drone.dispose(), msg.duration || 5000);
+      
+      // Show revealed enemies on minimap
+      if (msg.playerId === this.playerId) {
+        msg.revealed.forEach(r => {
+          this.ui.showPingOnMinimap(r.position, msg.duration || 5000);
+        });
+      }
+    }
+
+    // Start cooldown UI for the player who used it
+    if (msg.playerId === this.playerId) {
+      const cooldownMs = msg.abilityId === 'wall_charge' ? 45000 : 30000;
+      this.ui.updateAbilityCooldown(Date.now() + cooldownMs);
+    }
   }
 
   destroy() {

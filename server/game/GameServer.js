@@ -108,6 +108,14 @@ class GameServer {
         this.handleWeaponSwitch(connId, msg.slot);
         break;
 
+      case 'ability':
+        this.handleAbility(connId);
+        break;
+
+      case 'select_operative':
+        this.handleSelectOperative(connId, msg);
+        break;
+
       case 'chat':
         this.handleChat(connId, msg);
         break;
@@ -283,6 +291,34 @@ class GameServer {
 
     const room = this.rooms.get(roomId);
     if (room) room.handleWeaponSwitch(connId, slot);
+  }
+
+  handleAbility(connId) {
+    const roomId = this.playerRooms.get(connId);
+    if (!roomId) return;
+
+    const room = this.rooms.get(roomId);
+    if (room) room.handleAbility(connId);
+  }
+
+  handleSelectOperative(connId, msg) {
+    const roomId = this.playerRooms.get(connId);
+    if (roomId) {
+      // In-game operative switch (will apply on next spawn usually)
+      const room = this.rooms.get(roomId);
+      const player = room?.players.get(connId);
+      if (player && msg.operativeId) {
+        player.operative = msg.operativeId;
+      }
+    } else {
+      // Pre-game operative switch
+      for (const [ws, conn] of this.connections) {
+        if (conn.connId === connId) {
+          conn.operative = msg.operativeId;
+          break;
+        }
+      }
+    }
   }
 
   handleChat(connId, msg) {

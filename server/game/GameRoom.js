@@ -3,6 +3,7 @@ const Player = require('./Player');
 const { Bot, BOT_NAMES } = require('./Bot');
 const { WEAPONS, calculateDamage, getSpread } = require('./weapons');
 const { GAME_MODES, GameModeState } = require('./gameModes');
+const { OPERATIVES, executeAbility } = require('./Operative');
 
 // ─── Map Definitions ────────────────────────────────────
 const MAPS = {
@@ -50,6 +51,50 @@ const MAPS = {
       { min: { x: 20, z: 20 }, max: { x: 25, z: 25 }, height: 3 },
       { min: { x: -12, z: 10 }, max: { x: -8, z: 14 }, height: 2 },
       { min: { x: 8, z: -14 }, max: { x: 12, z: -10 }, height: 2 },
+    ]
+  },
+  gridlock: {
+    id: 'gridlock',
+    name: 'Gridlock',
+    theme: 'downtown',
+    size: { x: 70, z: 70 },
+    spawnPoints: {
+      ffa: [
+        { x: -25, y: 1.8, z: -25 }, { x: 25, y: 1.8, z: -25 },
+        { x: -25, y: 1.8, z: 25 },  { x: 25, y: 1.8, z: 25 },
+        { x: 0, y: 1.8, z: 25 },    { x: 0, y: 1.8, z: -25 },
+        { x: -25, y: 1.8, z: 0 },   { x: 25, y: 1.8, z: 0 }
+      ],
+      team: [
+        [ // Attackers (NW)
+          { x: -28, y: 1.8, z: -28 }, { x: -25, y: 1.8, z: -25 },
+          { x: -22, y: 1.8, z: -22 }, { x: -28, y: 1.8, z: -22 },
+          { x: -22, y: 1.8, z: -28 }, { x: -25, y: 1.8, z: -28 }
+        ],
+        [ // Defenders (SE)
+          { x: 28, y: 1.8, z: 28 }, { x: 25, y: 1.8, z: 25 },
+          { x: 22, y: 1.8, z: 22 }, { x: 28, y: 1.8, z: 22 },
+          { x: 22, y: 1.8, z: 28 }, { x: 25, y: 1.8, z: 28 }
+        ]
+      ]
+    },
+    bombSites: {
+      A: { x: -15, y: 4, z: 18 },
+      B: { x: 18, y: 0, z: -15 }
+    },
+    controlPoints: {
+      A: { x: -20, y: 0, z: 0 },
+      B: { x: 0, y: 0, z: 0 },
+      C: { x: 20, y: 0, z: 0 }
+    },
+    obstacles: [
+      { min: { x: -18, z: 12 }, max: { x: -8, z: 22 }, height: 10 }, // Building A
+      { min: { x: 12, z: -22 }, max: { x: 22, z: -8 }, height: 6 },  // Building B
+      { min: { x: -22, z: -12 }, max: { x: -12, z: -2 }, height: 8 }, // Building C
+      { min: { x: 12, z: 12 }, max: { x: 22, z: 22 }, height: 12 },   // Building D
+      { min: { x: -6, z: -4 }, max: { x: 6, z: 4 }, height: 2.5 },    // Center Vehicles
+      { min: { x: -28, z: -8 }, max: { x: -22, z: 8 }, height: 15 },  // Tall corner NW
+      { min: { x: 22, z: -8 }, max: { x: 28, z: 8 }, height: 15 }     // Tall corner SE
     ]
   }
 };
@@ -266,6 +311,14 @@ class GameRoom {
       }
     }
 
+    if (this.modeId === 'plant_defuse') {
+      const events = this.gameState.updatePhase();
+      for (const event of events) {
+        this.broadcast({ type: 'game_event', event });
+        if (event.type === 'game_over') this.endGame();
+      }
+    }
+
     // Time limit check
     const timeEvents = this.gameState.checkTimeLimit();
     for (const event of timeEvents) {
@@ -304,6 +357,8 @@ class GameRoom {
   }
 
   handleShoot(playerId) {
+    if (this.modeId === 'plant_defuse' && this.gameState.phase !== 'engagement') return;
+
     const player = this.players.get(playerId);
     if (!player) return;
 
@@ -580,6 +635,31 @@ class GameRoom {
       type: 'weapon_switch',
       playerId,
       weaponId: newWeapon
+    });
+  }
+
+  handleAbility(playerId) {
+    const player = this.players.get(playerId);
+    if (!player) return;
+
+    const operative = OPERATIVES[player.operative];
+    if (!operative) return;
+
+    const result = executeAbility(operative, player, this);
+    if (!result.success) {
+      this.sendTo(playerId, {
+        type: 'ability_failed',
+        reason: result.reason,
+        remaining: result.remaining
+      });
+      return;
+    }
+
+    this.broadcast({
+      type: 'ability_effect',
+      playerId,
+      operative: player.operative,
+      ...result
     });
   }
 

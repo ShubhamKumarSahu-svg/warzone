@@ -15,7 +15,8 @@ class UIManager {
       'reload-indicator', 'death-screen', 'killed-by', 'respawn-countdown',
       'scoreboard-overlay', 'scoreboard-body', 'scoreboard-teams', 'scoreboard-title',
       'game-over-overlay', 'game-over-result', 'game-over-stats',
-      'pause-menu', 'crosshair', 'chat-messages', 'chat-input', 'minimap-canvas'
+      'pause-menu', 'crosshair', 'chat-messages', 'chat-input', 'minimap-canvas',
+      'ability-icon', 'ability-cooldown-arc', 'phase-banner', 'phase-title', 'phase-timer'
     ];
     ids.forEach(id => { this.elements[id] = document.getElementById(id); });
   }
@@ -203,6 +204,102 @@ class UIManager {
         ctx.arc(rx, ry, 3, 0, Math.PI * 2);
         ctx.fill();
       });
+    }
+
+    // Draw active pings
+    if (this.minimapPings) {
+      const now = Date.now();
+      this.minimapPings = this.minimapPings.filter(p => now < p.expires);
+      this.minimapPings.forEach(p => {
+        const rx = (p.position.x - selfPos.x) * scale + w / 2;
+        const ry = (p.position.z - selfPos.z) * scale + h / 2;
+        if (rx >= 0 && rx <= w && ry >= 0 && ry <= h) {
+          ctx.fillStyle = '#ff0000';
+          ctx.beginPath();
+          ctx.arc(rx, ry, 5, 0, Math.PI * 2);
+          ctx.fill();
+          // Radar ping pulse effect
+          const pulse = (now % 1000) / 1000;
+          ctx.strokeStyle = `rgba(255, 0, 0, ${1 - pulse})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(rx, ry, 5 + pulse * 10, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      });
+    }
+  }
+
+  showPingOnMinimap(position, duration) {
+    if (!this.minimapPings) this.minimapPings = [];
+    this.minimapPings.push({
+      position,
+      expires: Date.now() + duration
+    });
+  }
+
+  updateAbilityCooldown(cooldownEnd) {
+    if (this.cooldownInterval) clearInterval(this.cooldownInterval);
+    const icon = this.el('ability-icon');
+    const arc = this.el('ability-cooldown-arc');
+    if (!icon || !arc) return;
+
+    const tick = () => {
+      const now = Date.now();
+      if (now >= cooldownEnd) {
+        icon.style.opacity = '1';
+        arc.style.height = '0%';
+        clearInterval(this.cooldownInterval);
+      } else {
+        icon.style.opacity = '0.3';
+        // Assume max 45s cooldown for display scaling
+        const pct = Math.min(100, ((cooldownEnd - now) / 45000) * 100);
+        arc.style.height = `${pct}%`;
+      }
+    };
+    
+    tick();
+    if (Date.now() < cooldownEnd) {
+      this.cooldownInterval = setInterval(tick, 100);
+    }
+  }
+
+  showPhaseBanner(phase, duration, subtitle) {
+    const banner = this.el('phase-banner');
+    const titleEl = this.el('phase-title');
+    const timerEl = this.el('phase-timer');
+    if (!banner || !titleEl || !timerEl) return;
+
+    if (this.phaseTimerInterval) clearInterval(this.phaseTimerInterval);
+
+    let phaseName = phase.toUpperCase();
+    if (subtitle && phase === 'engagement') phaseName = `ROUND ${subtitle} - ENGAGEMENT`;
+    else if (subtitle && phase !== 'engagement') phaseName = subtitle;
+
+    titleEl.textContent = phaseName;
+    banner.className = `phase-banner active phase-${phase}`;
+
+    let seconds = duration;
+    const update = () => {
+      if (seconds <= 0) {
+        if (phase === 'debrief' || phase === 'preparation') banner.className = 'phase-banner';
+        clearInterval(this.phaseTimerInterval);
+        return;
+      }
+      const m = Math.floor(seconds / 60);
+      const s = Math.floor(seconds % 60);
+      timerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+      seconds--;
+    };
+    
+    update();
+    this.phaseTimerInterval = setInterval(update, 1000);
+    
+    // Auto-hide engagement banner after 5 seconds
+    if (phase === 'engagement') {
+      setTimeout(() => {
+        banner.className = 'phase-banner';
+      }, 5000);
     }
   }
 }

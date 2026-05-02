@@ -3,20 +3,20 @@
    ═══════════════════════════════════════════════════════════ */
 
 :root {
-  --primary: #00f0ff;
-  --primary-dim: #00a5b0;
-  --accent: #ff3e3e;
+  --primary: #ffaa00;
+  --primary-dim: #cc8800;
+  --accent: #ff4444;
   --accent-glow: #ff6b6b;
   --gold: #ffd700;
-  --bg-dark: #0a0e17;
-  --bg-card: rgba(12, 18, 30, 0.92);
-  --bg-glass: rgba(20, 30, 50, 0.7);
-  --border: rgba(0, 240, 255, 0.15);
-  --text: #e0e8f0;
-  --text-dim: #7a8ba0;
-  --green: #00ff88;
-  --team-blue: #4488ff;
-  --team-red: #ff4444;
+  --bg-dark: #0f1115;
+  --bg-card: rgba(15, 17, 21, 0.95);
+  --bg-glass: rgba(25, 28, 35, 0.75);
+  --border: rgba(255, 170, 0, 0.2);
+  --text: #e0e6ed;
+  --text-dim: #8b95a5;
+  --green: #44aa44;
+  --team-blue: #ffaa00;
+  --team-red: #44aa44;
   --font-ui: 'Rajdhani', sans-serif;
   --font-display: 'Orbitron', sans-serif;
   --font-mono: 'Share Tech Mono', monospace;
@@ -395,3 +395,47 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
 /* ─── Animations ─────────────────────────────────────── */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .screen.active { animation: fadeIn 0.3s ease; }
+
+/* Ability Indicator */
+.ability-indicator {
+  position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+  width: 50px; height: 50px; border-radius: 4px;
+  background: rgba(0, 0, 0, 0.4); border: 2px solid rgba(255, 255, 255, 0.1);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.ability-icon {
+  font-family: var(--font-display); font-size: 24px; font-weight: 800;
+  color: var(--primary); z-index: 2; transition: opacity 0.2s;
+}
+.ability-cooldown-arc {
+  position: absolute; bottom: 0; left: 0; width: 100%; height: 0%;
+  background: rgba(255, 0, 0, 0.5); z-index: 1; transition: height 0.1s linear;
+}
+
+/* Phase Banner */
+.phase-banner {
+  position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: rgba(10, 14, 23, 0.9); border: 1px solid var(--border);
+  border-radius: 4px; padding: 12px 32px;
+  opacity: 0; pointer-events: none; transition: opacity 0.3s, transform 0.3s;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  transform: translate(-50%, -20px);
+}
+.phase-banner.active {
+  opacity: 1; transform: translate(-50%, 0);
+}
+.phase-banner.phase-preparation { border-color: var(--primary); }
+.phase-banner.phase-engagement { border-color: var(--accent); }
+.phase-banner.phase-debrief { border-color: var(--gold); }
+
+.phase-title {
+  font-family: var(--font-display); font-size: 18px; font-weight: 800;
+  letter-spacing: 6px; color: var(--text);
+}
+.phase-timer {
+  font-family: var(--font-mono); font-size: 24px; font-weight: 700;
+  color: var(--primary-dim);
+}
+

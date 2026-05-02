@@ -226,6 +226,12 @@ async function updateLoadout() {
   } catch (e) { /* silent */ }
 }
 
+function updateOperative() {
+  const operativeId = document.getElementById('operative-select')?.value;
+  if (!operativeId || !network || !network.connected) return;
+  network.sendSelectOperative(operativeId);
+}
+
 function updateGraphicsQuality() {
   if (game && game.graphics) {
     game.graphics.apply(document.getElementById('graphics-quality').value);

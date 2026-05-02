@@ -27,6 +27,10 @@ class Player {
     this.respawnTimer = 0;
     this.spawnProtectionUntil = Date.now() + 3000; // 3s spawn protection
 
+    // ─── Operative ───────────────────────────────────
+    this.operative = 'vega';
+    this.abilityCooldownEnd = 0;
+
     // ─── Weapons ──────────────────────────────────────
     this.primaryWeapon = 'm416';
     this.secondaryWeapon = 'desert_eagle';
@@ -220,7 +224,8 @@ class Player {
       crouching: this.crouching,
       moving: this.moving,
       currentWeapon: this.currentWeapon,
-      reloading: this.reloading
+      reloading: this.reloading,
+      operative: this.operative
     };
   }
 
@@ -231,7 +236,8 @@ class Player {
       reserveAmmo: this.reserveAmmo[this.currentWeapon],
       kills: this.kills,
       deaths: this.deaths,
-      score: this.score
+      score: this.score,
+      abilityCooldownEnd: this.abilityCooldownEnd
     };
   }
 }

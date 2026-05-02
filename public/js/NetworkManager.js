@@ -100,6 +100,14 @@ class NetworkManager {
     this.send({ type: 'chat', message });
   }
 
+  sendAbility() {
+    this.send({ type: 'ability' });
+  }
+
+  sendSelectOperative(operativeId) {
+    this.send({ type: 'select_operative', operativeId });
+  }
+
   getRooms() {
     this.send({ type: 'get_rooms' });
   }

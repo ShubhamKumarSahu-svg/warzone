@@ -75,6 +75,36 @@ const GAME_MODES = {
     bombSites: ['A', 'B']
   },
 
+  // ─── Plant and Defuse ─────────────────────────────────
+  plant_defuse: {
+    id: 'plant_defuse',
+    name: 'Plant & Defuse',
+    description: 'Tactical rounds: Prep → Engagement → Debrief. Best of 5.',
+    minPlayers: 2,
+    maxPlayers: 10,
+    teams: true,
+    teamCount: 2,
+    teamNames: ['Attackers', 'Defenders'],
+    teamColors: ['#ff8800', '#44aa44'],
+    roundsToWin: 3,
+    prepTime: 60,
+    engagementTime: 150,
+    debriefTime: 15,
+    respawnTime: -1,
+    friendlyFire: false,
+    bombTimer: 40,
+    defuseTime: 7,
+    plantTime: 4,
+    scoringRules: {
+      kill: 200,
+      headshot_bonus: 50,
+      plant_bomb: 300,
+      defuse_bomb: 500,
+      round_win: 500
+    },
+    bombSites: ['A', 'B']
+  },
+
   // ─── Domination ───────────────────────────────────────
   domination: {
     id: 'domination',
@@ -129,6 +159,16 @@ class GameModeState {
       this.alivePlayers = { 0: [], 1: [] };
     }
 
+    if (modeId === 'plant_defuse') {
+      this.bombPlanted = false;
+      this.bombSite = null;
+      this.bombPlantTime = 0;
+      this.bombCarrier = null;
+      this.alivePlayers = { 0: [], 1: [] };
+      this.phase = 'preparation'; // preparation, engagement, debrief
+      this.phaseStartTime = Date.now();
+    }
+
     if (modeId === 'domination') {
       this.controlPoints = {};
       for (const cp of this.mode.controlPoints) {
@@ -166,11 +206,15 @@ class GameModeState {
       if (!this.alivePlayers[team]) this.alivePlayers[team] = [];
       this.alivePlayers[team].push(playerId);
     }
+    if (this.modeId === 'plant_defuse' && team >= 0) {
+      if (!this.alivePlayers[team]) this.alivePlayers[team] = [];
+      this.alivePlayers[team].push(playerId);
+    }
   }
 
   removePlayer(playerId) {
     const pScore = this.playerScores[playerId];
-    if (this.modeId === 'snd' && pScore) {
+    if ((this.modeId === 'snd' || this.modeId === 'plant_defuse') && pScore) {
       const team = pScore.team;
       if (this.alivePlayers[team]) {
         this.alivePlayers[team] = this.alivePlayers[team].filter(id => id !== playerId);
@@ -346,6 +390,42 @@ class GameModeState {
       }
     }
     return [];
+  }
+
+  updatePhase() {
+    if (this.modeId !== 'plant_defuse' || this.roundPhase !== 'playing') return [];
+
+    const elapsed = (Date.now() - this.phaseStartTime) / 1000;
+    const events = [];
+
+    if (this.phase === 'preparation' && elapsed >= this.mode.prepTime) {
+      this.phase = 'engagement';
+      this.phaseStartTime = Date.now();
+      events.push({ type: 'phase_change', phase: this.phase, timeLimit: this.mode.engagementTime, round: this.round });
+    }
+    else if (this.phase === 'engagement' && elapsed >= this.mode.engagementTime) {
+      this.phase = 'debrief';
+      this.phaseStartTime = Date.now();
+      // Defenders win if time runs out and bomb not planted
+      const winTeam = 1;
+      this.roundWins[winTeam]++;
+      events.push({ type: 'round_end', winnerTeam: winTeam, reason: 'time' });
+      events.push({ type: 'phase_change', phase: this.phase, timeLimit: this.mode.debriefTime, winnerTeam: winTeam });
+      
+      if (this.roundWins[winTeam] >= this.mode.roundsToWin) {
+        this.winner = winTeam;
+        events.push({ type: 'game_over', winnerTeam: winTeam });
+      }
+    }
+    else if (this.phase === 'debrief' && elapsed >= this.mode.debriefTime) {
+      this.round++;
+      this.phase = 'preparation';
+      this.phaseStartTime = Date.now();
+      events.push({ type: 'round_start', round: this.round });
+      events.push({ type: 'phase_change', phase: this.phase, timeLimit: this.mode.prepTime, round: this.round });
+    }
+
+    return events;
   }
 
   getScoreboard() {
