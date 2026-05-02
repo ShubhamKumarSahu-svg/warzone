@@ -23,6 +23,7 @@
  *        crash when the class isn't defined elsewhere.
  */
 
+
 class Game {
   constructor(network) {
     this.network = network;

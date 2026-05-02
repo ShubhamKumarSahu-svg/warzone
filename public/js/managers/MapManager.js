@@ -26,7 +26,14 @@ class MapManager {
 
   buildMap(mapData, assetLoader) {
     this.assetLoader = assetLoader;
-    this._spawnPoints = mapData.spawnPoints || this._defaultSpawnPoints(mapData);
+    
+    if (mapData.spawnPoints && Array.isArray(mapData.spawnPoints.ffa)) {
+      this._spawnPoints = mapData.spawnPoints.ffa;
+    } else if (Array.isArray(mapData.spawnPoints)) {
+      this._spawnPoints = mapData.spawnPoints;
+    } else {
+      this._spawnPoints = this._defaultSpawnPoints(mapData);
+    }
 
     if (mapData.theme === 'downtown') {
       this._buildBase(mapData);
