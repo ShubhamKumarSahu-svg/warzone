@@ -589,11 +589,13 @@ class Game {
         this.moveVelocity.x += (targetVx - this.moveVelocity.x) * t;
         this.moveVelocity.z += (targetVz - this.moveVelocity.z) * t;
       } else {
-      // Friction deceleration
-      const t = 1 - Math.exp(-this.deceleration * dt);
-      this.moveVelocity.x *= (1 - t);
-      this.moveVelocity.z *= (1 - t);
-    }
+        // Friction deceleration
+        const t = 1 - Math.exp(-this.deceleration * dt);
+        this.moveVelocity.x *= (1 - t);
+        this.moveVelocity.z *= (1 - t);
+      }
+    } // Close if(!this.sliding)
+    
     const speedMult = this.crouching ? 0.5 : 1.0;
 
     // Jump
