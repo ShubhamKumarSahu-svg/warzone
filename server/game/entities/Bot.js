@@ -1,7 +1,7 @@
 /**
  * Basic AI Bot with simple pathfinding and decision making.
  */
-const { WEAPONS } = require('./weapons');
+const { WEAPONS } = require('../data/weapons');
 
 class Bot {
   constructor(id, name, team, difficulty = 'normal') {

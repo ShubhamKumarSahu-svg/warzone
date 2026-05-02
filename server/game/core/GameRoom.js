@@ -1,9 +1,9 @@
 const { v4: uuidv4 } = require('uuid');
-const Player = require('./Player');
-const { Bot, BOT_NAMES } = require('./Bot');
-const { WEAPONS, calculateDamage, getSpread } = require('./weapons');
-const { GAME_MODES, GameModeState } = require('./gameModes');
-const { OPERATIVES, executeAbility } = require('./Operative');
+const Player = require('../entities/Player');
+const { Bot, BOT_NAMES } = require('../entities/Bot');
+const { WEAPONS, calculateDamage, getSpread } = require('../data/weapons');
+const { GAME_MODES, GameModeState } = require('../systems/gameModes');
+const { OPERATIVES, executeAbility } = require('../data/Operative');
 
 // ─── Map Definitions ────────────────────────────────────
 const MAPS = {

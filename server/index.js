@@ -4,7 +4,7 @@ const { WebSocketServer } = require('ws');
 const path = require('path');
 const DB = require('./db');
 const { router: authRouter } = require('./auth');
-const GameServer = require('./game/GameServer');
+const GameServer = require('./game/core/GameServer');
 
 async function main() {
   await DB.initDB();

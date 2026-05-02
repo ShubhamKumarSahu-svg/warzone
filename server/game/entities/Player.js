@@ -1,4 +1,4 @@
-const { WEAPONS, calculateDamage } = require('./weapons');
+const { WEAPONS, calculateDamage } = require('../data/weapons');
 
 /**
  * Server-side Player representation.

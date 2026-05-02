@@ -1,10 +1,10 @@
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
 const { GameRoom } = require('./GameRoom');
-const { GAME_MODES } = require('./gameModes');
-const { WEAPONS } = require('./weapons');
-const DB = require('../db');
-const { JWT_SECRET } = require('../auth');
+const { GAME_MODES } = require('../systems/gameModes');
+const { WEAPONS } = require('../data/weapons');
+const DB = require('../../db');
+const { JWT_SECRET } = require('../../auth');
 
 class GameServer {
   constructor(wss) {
