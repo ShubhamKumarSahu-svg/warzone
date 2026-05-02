@@ -520,25 +520,26 @@ class GameRoom {
   }
 
   rayBoxIntersect(origin, dir, min, max, height) {
-    let tmin = (min.x - origin.x) / dir.x;
-    let tmax = (max.x - origin.x) / dir.x;
-    if (tmin > tmax) { const temp = tmin; tmin = tmax; tmax = temp; }
+    let tmin = -Infinity, tmax = Infinity;
 
-    let tymin = (0 - origin.y) / dir.y;
-    let tymax = (height - origin.y) / dir.y;
-    if (tymin > tymax) { const temp = tymin; tymin = tymax; tymax = temp; }
+    // Helper for each axis
+    const checkAxis = (originP, dirP, minP, maxP) => {
+      if (Math.abs(dirP) < 1e-6) {
+        if (originP < minP || originP > maxP) return false;
+      } else {
+        let t1 = (minP - originP) / dirP;
+        let t2 = (maxP - originP) / dirP;
+        if (t1 > t2) { const temp = t1; t1 = t2; t2 = temp; }
+        if (t1 > tmin) tmin = t1;
+        if (t2 < tmax) tmax = t2;
+        if (tmin > tmax) return false;
+      }
+      return true;
+    };
 
-    if ((tmin > tymax) || (tymin > tmax)) return null;
-    if (tymin > tmin) tmin = tymin;
-    if (tymax < tmax) tmax = tymax;
-
-    let tzmin = (min.z - origin.z) / dir.z;
-    let tzmax = (max.z - origin.z) / dir.z;
-    if (tzmin > tzmax) { const temp = tzmin; tzmin = tzmax; tzmax = temp; }
-
-    if ((tmin > tzmax) || (tzmin > tmax)) return null;
-    if (tzmin > tmin) tmin = tzmin;
-    if (tzmax < tmax) tmax = tzmax;
+    if (!checkAxis(origin.x, dir.x, min.x, max.x)) return null;
+    if (!checkAxis(origin.y, dir.y, 0, height)) return null;
+    if (!checkAxis(origin.z, dir.z, min.z, max.z)) return null;
 
     if (tmax < 0) return null;
     return { distance: tmin > 0 ? tmin : tmax };

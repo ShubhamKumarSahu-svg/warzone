@@ -51,18 +51,21 @@ class MapManager {
         
         // If it's the center vehicle cover
         if (obs.height < 5) {
-          const car = this.assetLoader.placeMapPiece('car_police', new BABYLON.Vector3(cx - 2, 0, cz));
-          const taxi = this.assetLoader.placeMapPiece('car_taxi', new BABYLON.Vector3(cx + 2, 0, cz));
-          if (car) { car.rotation.y = Math.PI / 4; this.addShadowCaster(car); }
-          if (taxi) { taxi.rotation.y = -Math.PI / 6; this.addShadowCaster(taxi); }
+          this.assetLoader.placeMapPiece('car_police', new BABYLON.Vector3(cx - 2, 0, cz)).then(car => {
+            if (car) { car.rotation.y = Math.PI / 4; this.addShadowCaster(car); }
+          });
+          this.assetLoader.placeMapPiece('car_taxi', new BABYLON.Vector3(cx + 2, 0, cz)).then(taxi => {
+            if (taxi) { taxi.rotation.y = -Math.PI / 6; this.addShadowCaster(taxi); }
+          });
         } else {
           // It's a building
-          const mesh = this.assetLoader.placeMapPiece(buildingType, new BABYLON.Vector3(cx, 0, cz));
-          if (mesh) {
-            // Rotate some buildings
-            mesh.rotation.y = (Math.PI / 2) * (i % 4);
-            this.addShadowCaster(mesh);
-          }
+          this.assetLoader.placeMapPiece(buildingType, new BABYLON.Vector3(cx, 0, cz)).then(mesh => {
+            if (mesh) {
+              // Rotate some buildings
+              mesh.rotation.y = (Math.PI / 2) * (i % 4);
+              this.addShadowCaster(mesh);
+            }
+          });
         }
 
         // Invisible collision box
@@ -175,11 +178,12 @@ class MapManager {
         else if (h >= 6) buildingType = 'building_B';
         else buildingType = 'building_E';
 
-        const mesh = this.assetLoader.placeMapPiece(buildingType, new BABYLON.Vector3(cx, 0, cz));
-        if (mesh) {
-          mesh.rotation.y = (Math.PI / 2) * (i % 4);
-          this.addShadowCaster(mesh);
-        }
+        this.assetLoader.placeMapPiece(buildingType, new BABYLON.Vector3(cx, 0, cz)).then(mesh => {
+          if (mesh) {
+            mesh.rotation.y = (Math.PI / 2) * (i % 4);
+            this.addShadowCaster(mesh);
+          }
+        });
 
         // Invisible collision box
         const box = BABYLON.MeshBuilder.CreateBox('col_' + i, { width: w, height: h, depth: d }, this.scene);
