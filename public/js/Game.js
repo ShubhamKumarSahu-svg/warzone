@@ -14,6 +14,7 @@ class Game {
     this.ui = new UIManager();
     this.map = null;
     this.graphics = null;
+    this.assetLoader = null;
 
     // Player state
     this.playerId = null;
@@ -31,6 +32,12 @@ class Game {
     this.grounded = true;
     this.crouching = false;
 
+    // Acceleration-based movement
+    this.moveVelocity = { x: 0, z: 0 };
+    this.acceleration = 40;
+    this.deceleration = 30;
+    this.maxMoveSpeed = 8;
+
     // Slide
     this.sliding = false;
     this.slideTimer = 0;
@@ -39,12 +46,27 @@ class Game {
     this.slideDir = { x: 0, z: 0 };
     this.slideCooldown = 0;
 
+    // Camera roll (slide/strafe tilt)
+    this.cameraRoll = 0;
+    this.targetRoll = 0;
+
     // Physics
     this.gravity = -20;
     this.jumpForce = 8;
     this.moveSpeed = 8;
     this.playerHeight = 1.8;
     this.playerRadius = 0.4;
+
+    // Shared materials (initialized after scene)
+    this.sharedMaterials = null;
+
+    // Bullet trail pool
+    this.trailPool = [];
+    this.trailPoolSize = 20;
+
+    // Perf HUD
+    this.perfEl = null;
+    this.fpsHistory = [];
 
     // Weapon visuals
     this.weaponMesh = null;
@@ -101,8 +123,23 @@ class Game {
     const quality = document.getElementById('graphics-quality')?.value || 'medium';
     this.graphics.apply(quality);
 
-    // Create weapon model
+    // Initialize shared systems (must be before addOtherPlayer which uses sharedMaterials)
+    this.initSharedMaterials();
+    this.initTrailPool();
+
+    // Preload 3D assets (characters, weapons) with loading bar feedback
+    this.assetLoader = new AssetLoader(this.scene);
+    const loadingFill = document.getElementById('loading-fill');
+    this.assetLoader.onProgress = (pct, label) => {
+      if (loadingFill) loadingFill.style.width = (30 + pct * 0.5) + '%';
+      const tipEl = document.getElementById('loading-tip');
+      if (tipEl) tipEl.textContent = label;
+    };
+    await this.assetLoader.preloadAll();
+
+    // Create weapon viewmodel (GLB blaster or fallback boxes)
     this.createWeaponModel();
+    this.initPerfHUD();
 
     // Spawn existing players
     if (roomData.allPlayers) {
@@ -142,42 +179,39 @@ class Game {
     root.position = this.weaponRestPos.clone();
     this.weaponRoot = root;
 
-    const gunMat = new BABYLON.StandardMaterial('gunMat', this.scene);
-    gunMat.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.17);
-    gunMat.specularColor = new BABYLON.Color3(0.4, 0.4, 0.4);
-    gunMat.specularPower = 64;
+    // Try to load GLB blaster model from AssetLoader
+    const weaponId = this.weapons.currentWeapon;
+    const glbModel = this.assetLoader ? this.assetLoader.createWeaponViewmodel(weaponId, root) : null;
 
-    const gunMat2 = new BABYLON.StandardMaterial('gunMat2', this.scene);
-    gunMat2.diffuseColor = new BABYLON.Color3(0.08, 0.08, 0.1);
-    gunMat2.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+    if (glbModel) {
+      // GLB loaded successfully — use it
+      this.weaponMesh = glbModel;
+    } else {
+      // Fallback: procedural box weapon
+      const gunMat = new BABYLON.StandardMaterial('gunMat', this.scene);
+      gunMat.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.17);
+      gunMat.specularColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+      gunMat.specularPower = 64;
+      const gunMat2 = new BABYLON.StandardMaterial('gunMat2', this.scene);
+      gunMat2.diffuseColor = new BABYLON.Color3(0.08, 0.08, 0.1);
+      gunMat2.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
 
-    // Barrel
-    const barrel = BABYLON.MeshBuilder.CreateBox('barrel', { width: 0.04, height: 0.04, depth: 0.45 }, this.scene);
-    barrel.parent = root; barrel.position.set(0, 0.02, 0.15); barrel.material = gunMat;
+      const barrel = BABYLON.MeshBuilder.CreateBox('barrel', { width: 0.04, height: 0.04, depth: 0.45 }, this.scene);
+      barrel.parent = root; barrel.position.set(0, 0.02, 0.15); barrel.material = gunMat;
+      const body = BABYLON.MeshBuilder.CreateBox('body', { width: 0.06, height: 0.1, depth: 0.22 }, this.scene);
+      body.parent = root; body.position.set(0, 0, -0.02); body.material = gunMat2;
+      const mag = BABYLON.MeshBuilder.CreateBox('mag', { width: 0.04, height: 0.12, depth: 0.06 }, this.scene);
+      mag.parent = root; mag.position.set(0, -0.1, 0); mag.rotation.x = 0.15; mag.material = gunMat;
+      const grip = BABYLON.MeshBuilder.CreateBox('grip', { width: 0.04, height: 0.1, depth: 0.04 }, this.scene);
+      grip.parent = root; grip.position.set(0, -0.1, -0.1); grip.rotation.x = 0.3; grip.material = gunMat2;
+      const stock = BABYLON.MeshBuilder.CreateBox('stock', { width: 0.05, height: 0.06, depth: 0.12 }, this.scene);
+      stock.parent = root; stock.position.set(0, 0.01, -0.18); stock.material = gunMat;
+      const sight = BABYLON.MeshBuilder.CreateBox('sight', { width: 0.025, height: 0.015, depth: 0.1 }, this.scene);
+      sight.parent = root; sight.position.set(0, 0.065, 0.05); sight.material = gunMat2;
+      this.weaponMesh = body;
+    }
 
-    // Body / receiver
-    const body = BABYLON.MeshBuilder.CreateBox('body', { width: 0.06, height: 0.1, depth: 0.22 }, this.scene);
-    body.parent = root; body.position.set(0, 0, -0.02); body.material = gunMat2;
-
-    // Magazine
-    const mag = BABYLON.MeshBuilder.CreateBox('mag', { width: 0.04, height: 0.12, depth: 0.06 }, this.scene);
-    mag.parent = root; mag.position.set(0, -0.1, 0); mag.rotation.x = 0.15; mag.material = gunMat;
-
-    // Grip
-    const grip = BABYLON.MeshBuilder.CreateBox('grip', { width: 0.04, height: 0.1, depth: 0.04 }, this.scene);
-    grip.parent = root; grip.position.set(0, -0.1, -0.1); grip.rotation.x = 0.3; grip.material = gunMat2;
-
-    // Stock
-    const stock = BABYLON.MeshBuilder.CreateBox('stock', { width: 0.05, height: 0.06, depth: 0.12 }, this.scene);
-    stock.parent = root; stock.position.set(0, 0.01, -0.18); stock.material = gunMat;
-
-    // Sight rail
-    const sight = BABYLON.MeshBuilder.CreateBox('sight', { width: 0.025, height: 0.015, depth: 0.1 }, this.scene);
-    sight.parent = root; sight.position.set(0, 0.065, 0.05); sight.material = gunMat2;
-
-    this.weaponMesh = body; // reference for kick animation
-
-    // Muzzle flash
+    // Muzzle flash (always add)
     const flash = BABYLON.MeshBuilder.CreatePlane('muzzle', { size: 0.15 }, this.scene);
     const flashMat = new BABYLON.StandardMaterial('flashMat', this.scene);
     flashMat.emissiveColor = new BABYLON.Color3(1, 0.8, 0.3);
@@ -293,6 +327,8 @@ class Game {
         this.weapons.setWeapon(msg.weaponId);
         const wd = this.weapons.getWeaponData(msg.weaponId);
         this.ui.updateWeaponName(wd ? wd.name : msg.weaponId);
+        // Rebuild viewmodel with new weapon's GLB blaster
+        this.createWeaponModel();
       }
     });
 
@@ -326,55 +362,57 @@ class Game {
   addOtherPlayer(data) {
     if (this.otherPlayers[data.id]) return;
 
-    // Root transform
-    const root = new BABYLON.TransformNode('proot_' + data.id, this.scene);
-    root.position.set(data.position.x, data.position.y - 0.9, data.position.z);
+    // Try to use GLB character model from AssetLoader
+    const characterModel = this.assetLoader
+      ? this.assetLoader.createPlayerCharacter(null, data.team)
+      : null;
 
-    const teamColor = data.team === 0
-      ? new BABYLON.Color3(0.2, 0.4, 0.9)
-      : data.team === 1
-        ? new BABYLON.Color3(0.9, 0.2, 0.2)
-        : new BABYLON.Color3(0.6, 0.6, 0.2);
+    let root, torso, head;
 
-    const bodyMat = new BABYLON.StandardMaterial('pmat_' + data.id, this.scene);
-    bodyMat.diffuseColor = teamColor;
-    const skinMat = new BABYLON.StandardMaterial('pskin_' + data.id, this.scene);
-    skinMat.diffuseColor = new BABYLON.Color3(0.75, 0.6, 0.5);
-    const darkMat = new BABYLON.StandardMaterial('pdark_' + data.id, this.scene);
-    darkMat.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.18);
+    if (characterModel) {
+      // GLB character loaded
+      root = characterModel;
+      root.position.set(data.position.x, data.position.y - 0.9, data.position.z);
+      torso = root; // reference the root for shadow casting
+      head = root;  // simplified reference
 
-    // Torso
-    const torso = BABYLON.MeshBuilder.CreateBox('torso_' + data.id, { width: 0.5, height: 0.65, depth: 0.3 }, this.scene);
-    torso.parent = root; torso.position.y = 0.55; torso.material = bodyMat;
+      // Add shadow casting for child meshes
+      if (this.map) {
+        root.getChildMeshes().forEach(m => this.map.addShadowCaster(m));
+      }
+    } else {
+      // Fallback: procedural box character
+      root = new BABYLON.TransformNode('proot_' + data.id, this.scene);
+      root.position.set(data.position.x, data.position.y - 0.9, data.position.z);
 
-    // Head
-    const head = BABYLON.MeshBuilder.CreateSphere('head_' + data.id, { diameter: 0.38, segments: 10 }, this.scene);
-    head.parent = root; head.position.y = 1.15; head.material = skinMat;
+      const bodyMat = this.sharedMaterials.team[data.team] || this.sharedMaterials.team[2];
+      const skinMat = this.sharedMaterials.skin;
+      const darkMat = this.sharedMaterials.dark;
 
-    // Helmet
-    const helmet = BABYLON.MeshBuilder.CreateSphere('helmet_' + data.id, { diameter: 0.42, segments: 8, slice: 0.5 }, this.scene);
-    helmet.parent = root; helmet.position.y = 1.2; helmet.material = darkMat;
+      torso = BABYLON.MeshBuilder.CreateBox('torso_' + data.id, { width: 0.5, height: 0.65, depth: 0.3 }, this.scene);
+      torso.parent = root; torso.position.y = 0.55; torso.material = bodyMat;
+      head = BABYLON.MeshBuilder.CreateSphere('head_' + data.id, { diameter: 0.38, segments: 10 }, this.scene);
+      head.parent = root; head.position.y = 1.15; head.material = skinMat;
+      const helmet = BABYLON.MeshBuilder.CreateSphere('helmet_' + data.id, { diameter: 0.42, segments: 8, slice: 0.5 }, this.scene);
+      helmet.parent = root; helmet.position.y = 1.2; helmet.material = darkMat;
+      const armL = BABYLON.MeshBuilder.CreateBox('armL_' + data.id, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
+      armL.parent = root; armL.position.set(-0.35, 0.55, 0); armL.material = bodyMat;
+      const armR = BABYLON.MeshBuilder.CreateBox('armR_' + data.id, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
+      armR.parent = root; armR.position.set(0.35, 0.55, 0); armR.material = bodyMat;
+      const legL = BABYLON.MeshBuilder.CreateBox('legL_' + data.id, { width: 0.18, height: 0.5, depth: 0.18 }, this.scene);
+      legL.parent = root; legL.position.set(-0.13, 0, 0); legL.material = darkMat;
+      const legR = BABYLON.MeshBuilder.CreateBox('legR_' + data.id, { width: 0.18, height: 0.5, depth: 0.18 }, this.scene);
+      legR.parent = root; legR.position.set(0.13, 0, 0); legR.material = darkMat;
+      const gun = BABYLON.MeshBuilder.CreateBox('gun_' + data.id, { width: 0.04, height: 0.04, depth: 0.35 }, this.scene);
+      gun.parent = root; gun.position.set(0.3, 0.5, 0.2); gun.material = darkMat;
 
-    // Arms
-    const armL = BABYLON.MeshBuilder.CreateBox('armL_' + data.id, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
-    armL.parent = root; armL.position.set(-0.35, 0.55, 0); armL.material = bodyMat;
-    const armR = BABYLON.MeshBuilder.CreateBox('armR_' + data.id, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
-    armR.parent = root; armR.position.set(0.35, 0.55, 0); armR.material = bodyMat;
+      if (this.map) this.map.addShadowCaster(torso);
+    }
 
-    // Legs
-    const legL = BABYLON.MeshBuilder.CreateBox('legL_' + data.id, { width: 0.18, height: 0.5, depth: 0.18 }, this.scene);
-    legL.parent = root; legL.position.set(-0.13, 0, 0); legL.material = darkMat;
-    const legR = BABYLON.MeshBuilder.CreateBox('legR_' + data.id, { width: 0.18, height: 0.5, depth: 0.18 }, this.scene);
-    legR.parent = root; legR.position.set(0.13, 0, 0); legR.material = darkMat;
-
-    // Held weapon (small box)
-    const gun = BABYLON.MeshBuilder.CreateBox('gun_' + data.id, { width: 0.04, height: 0.04, depth: 0.35 }, this.scene);
-    gun.parent = root; gun.position.set(0.3, 0.5, 0.2); gun.material = darkMat;
-
-    // Name tag
+    // Name tag (always add above character)
     const nameplane = BABYLON.MeshBuilder.CreatePlane('name_' + data.id, { width: 2, height: 0.3 }, this.scene);
     nameplane.parent = root;
-    nameplane.position.y = 1.7;
+    nameplane.position.y = characterModel ? 2.2 : 1.7;
     nameplane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
     const nameTex = new BABYLON.DynamicTexture('nameTex_' + data.id, { width: 256, height: 40 }, this.scene);
     const nameCtx = nameTex.getContext();
@@ -392,8 +430,6 @@ class Game {
     nameMat.useAlphaFromDiffuseTexture = true;
     nameplane.material = nameMat;
 
-    if (this.map) this.map.addShadowCaster(torso);
-
     this.otherPlayers[data.id] = { mesh: root, state: data, head, torso };
   }
 
@@ -401,18 +437,13 @@ class Game {
     const op = this.otherPlayers[data.id];
     if (!op) return;
 
-    const mesh = op.mesh;
-    const target = new BABYLON.Vector3(data.position.x, data.position.y - 0.9, data.position.z);
-    mesh.position = BABYLON.Vector3.Lerp(mesh.position, target, 0.3);
-    mesh.rotation.y = data.rotation.y;
-
-    if (!data.alive) {
-      mesh.setEnabled(false);
-    } else {
-      mesh.setEnabled(true);
-    }
-
+    // Store server target for frame-rate independent interpolation
+    op.targetPosition = new BABYLON.Vector3(
+      data.position.x, data.position.y - 0.9, data.position.z
+    );
+    op.targetRotation = data.rotation.y;
     op.state = data;
+    op.mesh.setEnabled(!!data.alive);
   }
 
   removeOtherPlayer(id) {
@@ -444,6 +475,9 @@ class Game {
     this.weapons.updateRecoil(dt);
     this.updateReloadAnim(dt);
     this.updateSlide(dt);
+    this.updateTrails(dt);
+    this.interpolateOtherPlayers(dt);
+    this.updatePerfHUD(dt);
     this.scene.render();
   }
 
@@ -464,10 +498,9 @@ class Game {
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
 
-    // Movement (skip if sliding — slide has its own movement)
+    // Movement with acceleration/deceleration
     const move = this.input.getMovement();
     const isMoving = move.forward !== 0 || move.right !== 0;
-    let speed = this.crouching ? this.moveSpeed * 0.5 : this.moveSpeed;
 
     // Babylon FreeCamera faces -Z at rotation.y=0, so negate yaw for movement
     const moveYaw = -this.yaw;
@@ -481,10 +514,24 @@ class Game {
       this.slideDir = { x: Math.sin(moveAngle), z: Math.cos(moveAngle) };
     }
 
-    if (!this.sliding && isMoving) {
-      const moveAngle = Math.atan2(move.right, move.forward) + moveYaw;
-      this.camera.position.x += Math.sin(moveAngle) * speed * dt;
-      this.camera.position.z += Math.cos(moveAngle) * speed * dt;
+    if (!this.sliding) {
+      if (isMoving) {
+        const moveAngle = Math.atan2(move.right, move.forward) + moveYaw;
+        const targetVx = Math.sin(moveAngle) * this.maxMoveSpeed;
+        const targetVz = Math.cos(moveAngle) * this.maxMoveSpeed;
+        // Frame-rate independent exponential smoothing
+        const t = 1 - Math.exp(-this.acceleration * dt);
+        this.moveVelocity.x += (targetVx - this.moveVelocity.x) * t;
+        this.moveVelocity.z += (targetVz - this.moveVelocity.z) * t;
+      } else {
+        // Friction deceleration
+        const t = 1 - Math.exp(-this.deceleration * dt);
+        this.moveVelocity.x *= (1 - t);
+        this.moveVelocity.z *= (1 - t);
+      }
+      const speedMult = this.crouching ? 0.5 : 1.0;
+      this.camera.position.x += this.moveVelocity.x * speedMult * dt;
+      this.camera.position.z += this.moveVelocity.z * speedMult * dt;
     }
 
     // Jump
@@ -598,30 +645,25 @@ class Game {
   }
 
   createBulletTrail() {
+    const slot = this.trailPool.find(t => !t.active);
+    if (!slot) return;
+
     const cam = this.camera;
     const forward = cam.getForwardRay().direction;
     const start = cam.position.clone();
-    // Offset start slightly forward from camera
     start.addInPlace(forward.scale(1.0));
     const end = start.add(forward.scale(80));
 
-    const trail = BABYLON.MeshBuilder.CreateLines('trail_' + Date.now(), {
+    // Reuse pooled mesh
+    BABYLON.MeshBuilder.CreateLines('trail', {
       points: [start, end],
-      updatable: false
-    }, this.scene);
-    trail.color = new BABYLON.Color3(1, 0.85, 0.4);
-    trail.alpha = 0.6;
+      instance: slot.mesh
+    });
 
-    // Fade and remove
-    let life = 0;
-    const fadeInterval = setInterval(() => {
-      life += 16;
-      trail.alpha = Math.max(0, 0.6 - life / 200);
-      if (life >= 200) {
-        clearInterval(fadeInterval);
-        trail.dispose();
-      }
-    }, 16);
+    slot.mesh.alpha = 0.6;
+    slot.mesh.setEnabled(true);
+    slot.active = true;
+    slot.life = 0;
   }
 
   startReloadAnim() {
@@ -657,22 +699,26 @@ class Game {
   updateSlide(dt) {
     if (this.slideCooldown > 0) this.slideCooldown -= dt;
 
-    if (!this.sliding) return;
-
-    this.slideTimer -= dt;
-    const speedFactor = Math.max(0, this.slideTimer / this.slideDuration);
-    const currentSpeed = this.slideSpeed * speedFactor;
-
-    this.camera.position.x += this.slideDir.x * currentSpeed * dt;
-    this.camera.position.z += this.slideDir.z * currentSpeed * dt;
-
-    // Lower camera during slide
-    this.playerHeight = 1.2;
-
-    if (this.slideTimer <= 0) {
-      this.sliding = false;
-      this.playerHeight = 1.8;
+    if (this.sliding) {
+      this.slideTimer -= dt;
+      const speedFactor = Math.max(0, this.slideTimer / this.slideDuration);
+      this.camera.position.x += this.slideDir.x * this.slideSpeed * speedFactor * dt;
+      this.camera.position.z += this.slideDir.z * this.slideSpeed * speedFactor * dt;
+      this.targetRoll = 0.08; // camera tilt during slide
+      this.playerHeight = 1.2;
+      if (this.slideTimer <= 0) {
+        this.sliding = false;
+        this.playerHeight = 1.8;
+      }
+    } else {
+      // Strafe tilt
+      const move = this.input.getMovement();
+      this.targetRoll = move.right * -0.03;
     }
+
+    // Smooth camera roll
+    this.cameraRoll += (this.targetRoll - this.cameraRoll) * (1 - Math.exp(-10 * dt));
+    this.camera.rotation.z = this.cameraRoll;
   }
 
   togglePause() {
@@ -726,10 +772,89 @@ class Game {
     this.ui.showGameOver(result, stats);
   }
 
+  // ─── Shared Materials (O(1) instead of O(n×5)) ─────
+  initSharedMaterials() {
+    this.sharedMaterials = {
+      skin: new BABYLON.StandardMaterial('shared_skin', this.scene),
+      dark: new BABYLON.StandardMaterial('shared_dark', this.scene),
+      team: {}
+    };
+    this.sharedMaterials.skin.diffuseColor = new BABYLON.Color3(0.75, 0.6, 0.5);
+    this.sharedMaterials.dark.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.18);
+    this.sharedMaterials.team[0] = new BABYLON.StandardMaterial('shared_team0', this.scene);
+    this.sharedMaterials.team[0].diffuseColor = new BABYLON.Color3(0.2, 0.4, 0.9);
+    this.sharedMaterials.team[1] = new BABYLON.StandardMaterial('shared_team1', this.scene);
+    this.sharedMaterials.team[1].diffuseColor = new BABYLON.Color3(0.9, 0.2, 0.2);
+    this.sharedMaterials.team[2] = new BABYLON.StandardMaterial('shared_teamN', this.scene);
+    this.sharedMaterials.team[2].diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.2);
+  }
+
+  // ─── Bullet Trail Pool ─────────────────────────────
+  initTrailPool() {
+    for (let i = 0; i < this.trailPoolSize; i++) {
+      const trail = BABYLON.MeshBuilder.CreateLines('trail_' + i, {
+        points: [BABYLON.Vector3.Zero(), BABYLON.Vector3.One()],
+        updatable: true
+      }, this.scene);
+      trail.color = new BABYLON.Color3(1, 0.85, 0.4);
+      trail.setEnabled(false);
+      this.trailPool.push({ mesh: trail, active: false, life: 0 });
+    }
+  }
+
+  updateTrails(dt) {
+    for (const slot of this.trailPool) {
+      if (!slot.active) continue;
+      slot.life += dt;
+      slot.mesh.alpha = Math.max(0, 0.6 - slot.life / 0.2);
+      if (slot.life >= 0.2) {
+        slot.mesh.setEnabled(false);
+        slot.active = false;
+      }
+    }
+  }
+
+  // ─── Other Player Interpolation ────────────────────
+  interpolateOtherPlayers(dt) {
+    const lerpSpeed = 12;
+    const t = 1 - Math.exp(-lerpSpeed * dt);
+    for (const op of Object.values(this.otherPlayers)) {
+      if (!op.targetPosition) continue;
+      op.mesh.position = BABYLON.Vector3.Lerp(op.mesh.position, op.targetPosition, t);
+      const dAngle = op.targetRotation - op.mesh.rotation.y;
+      op.mesh.rotation.y += dAngle * t;
+    }
+  }
+
+  // ─── Performance HUD ──────────────────────────────
+  initPerfHUD() {
+    this.perfEl = document.createElement('div');
+    this.perfEl.style.cssText = `
+      position:fixed; top:8px; left:8px; font:12px monospace;
+      color:#0ff; background:rgba(0,0,0,0.5); padding:4px 8px;
+      border-radius:4px; pointer-events:none; z-index:9999;
+    `;
+    document.body.appendChild(this.perfEl);
+  }
+
+  updatePerfHUD(dt) {
+    if (!this.perfEl) return;
+    const fps = Math.round(1 / dt);
+    this.fpsHistory.push(fps);
+    if (this.fpsHistory.length > 60) this.fpsHistory.shift();
+    const avgFps = Math.round(this.fpsHistory.reduce((a, b) => a + b, 0) / this.fpsHistory.length);
+    const meshCount = this.scene.meshes.length;
+    const ping = this.network.latency || 0;
+    this.perfEl.textContent =
+      `FPS: ${fps} (avg: ${avgFps}) | Meshes: ${meshCount} | Ping: ${ping}ms`;
+  }
+
   destroy() {
     this.running = false;
     this.input.disable();
     this.input.exitPointerLock();
+    if (this.perfEl) { this.perfEl.remove(); this.perfEl = null; }
+    if (this.assetLoader) { this.assetLoader.dispose(); this.assetLoader = null; }
     if (this.engine) {
       this.engine.stopRenderLoop();
       this.scene?.dispose();

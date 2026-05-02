@@ -53,10 +53,11 @@ class WeaponSystem {
   }
 
   updateRecoil(dt) {
-    // Smooth recoil recovery
-    const recovery = 0.08; // lower = slower recovery
-    this.recoilOffset.x *= Math.pow(recovery, dt);
-    this.recoilOffset.y *= Math.pow(recovery, dt);
+    // Frame-rate independent recoil recovery using half-life decay
+    const halfLife = 0.08; // seconds to recover to 50%
+    const decay = Math.exp(-Math.LN2 / halfLife * dt);
+    this.recoilOffset.x *= decay;
+    this.recoilOffset.y *= decay;
   }
 
   setWeapon(id, ammo, reserve) {

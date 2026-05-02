@@ -64,8 +64,8 @@ class InputManager {
 
   _onMouseMove(e) {
     if (!this.locked) return;
-    this.mouse.dx = e.movementX;
-    this.mouse.dy = e.movementY;
+    this.mouse.dx += e.movementX;
+    this.mouse.dy += e.movementY;
   }
 
   _onMouseDown(e) {
