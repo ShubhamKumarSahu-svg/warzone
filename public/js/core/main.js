@@ -293,7 +293,7 @@ async function startGame(roomData) {
     // Set initial weapon name
     const wd = game.weapons.getWeaponData();
     if (wd) game.ui.updateWeaponName(wd.name);
-    game.ui.updateAmmo(roomData.player.ammo || 30, roomData.player.reserveAmmo || 90);
+    game.ui.updateAmmo(roomData.player.ammo || 30, '∞');
   }, 300);
 }
 

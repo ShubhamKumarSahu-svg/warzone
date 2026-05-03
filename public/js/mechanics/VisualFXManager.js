@@ -15,7 +15,6 @@ class VisualFXManager {
     this.muzzleFlash = null;   // Set via setMuzzleFlash()
   }
 
-  // ─── Muzzle Flash ────────────────────────────────────────────────────────────
 
   setMuzzleFlash(mesh) {
     this.muzzleFlash = mesh;

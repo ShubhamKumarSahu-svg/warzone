@@ -7,173 +7,201 @@ const { OPERATIVES, executeAbility } = require('../data/Operative');
 
 // ─── Map Definitions ────────────────────────────────────
 const MAPS = {
-  warehouse: {
-    id: 'warehouse',
-    name: 'Warehouse',
-    size: { x: 60, z: 60 },
+  // ─── MAP 1: NEON CITY ──────────────────────────────────────────────────────────
+  city: {
+    id: 'city',
+    name: 'Neon City',
+    theme: 'city',
+    size: { x: 120, z: 120 },
     spawnPoints: {
       ffa: [
-        { x: -20, y: 1.8, z: -20 }, { x: 20, y: 1.8, z: -20 },
-        { x: -20, y: 1.8, z: 20 },  { x: 20, y: 1.8, z: 20 },
-        { x: 0, y: 1.8, z: 0 },     { x: -10, y: 1.8, z: 10 },
-        { x: 10, y: 1.8, z: -10 },  { x: 15, y: 1.8, z: 15 }
+        { x: -55, y: 1.8, z: -55 }, { x: 55, y: 1.8, z: -55 },
+        { x: -55, y: 1.8, z: 55 },  { x: 55, y: 1.8, z: 55 },
+        { x: 0, y: 1.8, z: -55 },   { x: 0, y: 1.8, z: 55 },
+        { x: -55, y: 1.8, z: 0 },   { x: 55, y: 1.8, z: 0 },
+        { x: -15, y: 1.8, z: -15 }, { x: 15, y: 1.8, z: 15 }
       ],
       team: [
-        [
-          { x: -25, y: 1.8, z: -5 }, { x: -25, y: 1.8, z: 5 },
-          { x: -22, y: 1.8, z: 0 },  { x: -28, y: 1.8, z: 0 },
-          { x: -25, y: 1.8, z: -10 }, { x: -25, y: 1.8, z: 10 }
+        [ // Team 0 - SW Corner
+          { x: -55, y: 1.8, z: -55 }, { x: -50, y: 1.8, z: -55 },
+          { x: -55, y: 1.8, z: -50 }, { x: -45, y: 1.8, z: -55 },
+          { x: -55, y: 1.8, z: -45 }, { x: -50, y: 1.8, z: -50 }
         ],
-        [
-          { x: 25, y: 1.8, z: -5 },  { x: 25, y: 1.8, z: 5 },
-          { x: 22, y: 1.8, z: 0 },   { x: 28, y: 1.8, z: 0 },
-          { x: 25, y: 1.8, z: -10 }, { x: 25, y: 1.8, z: 10 }
+        [ // Team 1 - NE Corner
+          { x: 55, y: 1.8, z: 55 },  { x: 50, y: 1.8, z: 55 },
+          { x: 55, y: 1.8, z: 50 },  { x: 45, y: 1.8, z: 55 },
+          { x: 55, y: 1.8, z: 45 },  { x: 50, y: 1.8, z: 50 }
         ]
       ]
     },
-    bombSites: {
-      A: { x: -15, y: 0, z: 15 },
-      B: { x: 15, y: 0, z: -15 }
-    },
-    controlPoints: {
-      A: { x: -18, y: 0, z: 0 },
-      B: { x: 0, y: 0, z: 0 },
-      C: { x: 18, y: 0, z: 0 }
-    },
-    // Obstacles / collision boxes (simplified AABB)
+    bombSites: { A: { x: -30, y: 0, z: 30 }, B: { x: 30, y: 0, z: -30 } },
+    controlPoints: { A: { x: -35, y: 0, z: 0 }, B: { x: 0, y: 0, z: 0 }, C: { x: 35, y: 0, z: 0 } },
     obstacles: [
-      { min: { x: -5, z: -5 }, max: { x: 5, z: 5 }, height: 3 },  // center crate
-      { min: { x: -15, z: -2 }, max: { x: -10, z: 2 }, height: 4 },
-      { min: { x: 10, z: -2 }, max: { x: 15, z: 2 }, height: 4 },
-      { min: { x: -3, z: 15 }, max: { x: 3, z: 20 }, height: 2.5 },
-      { min: { x: -3, z: -20 }, max: { x: 3, z: -15 }, height: 2.5 },
-      { min: { x: -25, z: -25 }, max: { x: -20, z: -20 }, height: 3 },
-      { min: { x: 20, z: 20 }, max: { x: 25, z: 25 }, height: 3 },
-      { min: { x: -12, z: 10 }, max: { x: -8, z: 14 }, height: 2 },
-      { min: { x: 8, z: -14 }, max: { x: 12, z: -10 }, height: 2 },
+      // Central Plaza blocks (White/Grey with neon accents)
+      { min: { x: -10, z: -10 }, max: { x: -2, z: 10 }, height: 8, color: [0.8, 0.8, 0.8] },
+      { min: { x: 2, z: -10 }, max: { x: 10, z: 10 }, height: 8, color: [0.8, 0.8, 0.8] },
+      { shape: 'cylinder', min: { x: -3, z: -3 }, max: { x: 3, z: 3 }, height: 15, color: [0.1, 0.5, 0.9], emissive: [0.05, 0.2, 0.5] }, // Center tower
+      // NE Block (Cyan & Pink)
+      { min: { x: 20, z: 20 }, max: { x: 50, z: 50 }, height: 25, color: [0.1, 0.6, 0.8] },
+      { min: { x: 15, z: 20 }, max: { x: 20, z: 40 }, height: 12, color: [0.9, 0.2, 0.6] },
+      // NW Block (Orange & Dark Grey)
+      { min: { x: -50, z: 20 }, max: { x: -20, z: 50 }, height: 20, color: [0.2, 0.2, 0.25] },
+      { min: { x: -25, z: 15 }, max: { x: -20, z: 35 }, height: 10, color: [0.8, 0.4, 0.1] },
+      // SE Block (Purple & Yellow)
+      { min: { x: 20, z: -50 }, max: { x: 50, z: -20 }, height: 22, color: [0.5, 0.1, 0.7] },
+      { min: { x: 25, z: -25 }, max: { x: 45, z: -20 }, height: 15, color: [0.8, 0.7, 0.1] },
+      // SW Block (Green & White)
+      { min: { x: -50, z: -50 }, max: { x: -20, z: -20 }, height: 18, color: [0.1, 0.7, 0.3] },
+      { min: { x: -50, z: -20 }, max: { x: -35, z: -15 }, height: 8, color: [0.9, 0.9, 0.9] },
+      // Street Cover (Concrete Blocks)
+      { min: { x: -25, z: -5 }, max: { x: -21, z: 5 }, height: 2, color: [0.4, 0.4, 0.4] },
+      { min: { x: 21, z: -5 }, max: { x: 25, z: 5 }, height: 2, color: [0.4, 0.4, 0.4] },
+      { min: { x: -5, z: 21 }, max: { x: 5, z: 25 }, height: 2, color: [0.4, 0.4, 0.4] },
+      { min: { x: -5, z: -25 }, max: { x: 5, z: -21 }, height: 2, color: [0.4, 0.4, 0.4] },
+      // Advertising signs / thin walls
+      { min: { x: -40, z: 0 }, max: { x: -38, z: 12 }, height: 6, color: [0.9, 0.1, 0.2], emissive: [0.4, 0.05, 0.1] },
+      { min: { x: 38, z: -12 }, max: { x: 40, z: 0 }, height: 6, color: [0.1, 0.8, 0.9], emissive: [0.05, 0.4, 0.4] },
     ]
   },
-  gridlock: {
-    id: 'gridlock',
-    name: 'Gridlock',
-    theme: 'downtown',
-    size: { x: 70, z: 70 },
+
+  // ─── MAP 2: CRYSTAL CAVERN ──────────────────────────────────────────────────
+  cave: {
+    id: 'cave',
+    name: 'Crystal Cavern',
+    theme: 'cave',
+    size: { x: 100, z: 100 },
     spawnPoints: {
       ffa: [
-        { x: -25, y: 1.8, z: -25 }, { x: 25, y: 1.8, z: -25 },
-        { x: -25, y: 1.8, z: 25 },  { x: 25, y: 1.8, z: 25 },
-        { x: 0, y: 1.8, z: 25 },    { x: 0, y: 1.8, z: -25 },
-        { x: -25, y: 1.8, z: 0 },   { x: 25, y: 1.8, z: 0 }
+        { x: -40, y: 1.8, z: -40 }, { x: 40, y: 1.8, z: -40 },
+        { x: -40, y: 1.8, z: 40 },  { x: 40, y: 1.8, z: 40 },
+        { x: 0, y: 1.8, z: -35 },   { x: 0, y: 1.8, z: 35 },
+        { x: -20, y: 1.8, z: 0 },   { x: 20, y: 1.8, z: 0 },
+        { x: -10, y: 1.8, z: -20 }, { x: 10, y: 1.8, z: 20 }
       ],
       team: [
-        [ // Attackers (NW)
-          { x: -28, y: 1.8, z: -28 }, { x: -25, y: 1.8, z: -25 },
-          { x: -22, y: 1.8, z: -22 }, { x: -28, y: 1.8, z: -22 },
-          { x: -22, y: 1.8, z: -28 }, { x: -25, y: 1.8, z: -28 }
-        ],
-        [ // Defenders (SE)
-          { x: 28, y: 1.8, z: 28 }, { x: 25, y: 1.8, z: 25 },
-          { x: 22, y: 1.8, z: 22 }, { x: 28, y: 1.8, z: 22 },
-          { x: 22, y: 1.8, z: 28 }, { x: 25, y: 1.8, z: 28 }
-        ]
+        [ { x: -40, y: 1.8, z: -40 }, { x: -40, y: 1.8, z: -35 }, { x: -35, y: 1.8, z: -40 }, { x: -30, y: 1.8, z: -35 }, { x: -35, y: 1.8, z: -30 }, { x: -45, y: 1.8, z: -45 } ],
+        [ { x: 40, y: 1.8, z: 40 }, { x: 40, y: 1.8, z: 35 }, { x: 35, y: 1.8, z: 40 }, { x: 30, y: 1.8, z: 35 }, { x: 35, y: 1.8, z: 30 }, { x: 45, y: 1.8, z: 45 } ]
       ]
     },
-    bombSites: {
-      A: { x: -15, y: 4, z: 18 },
-      B: { x: 18, y: 0, z: -15 }
-    },
-    controlPoints: {
-      A: { x: -20, y: 0, z: 0 },
-      B: { x: 0, y: 0, z: 0 },
-      C: { x: 20, y: 0, z: 0 }
-    },
+    bombSites: { A: { x: -25, y: 0, z: 25 }, B: { x: 25, y: 0, z: -25 } },
+    controlPoints: { A: { x: -30, y: 0, z: 0 }, B: { x: 0, y: 0, z: 0 }, C: { x: 30, y: 0, z: 0 } },
     obstacles: [
-      { min: { x: -18, z: 12 }, max: { x: -8, z: 22 }, height: 10 }, // Building A
-      { min: { x: 12, z: -22 }, max: { x: 22, z: -8 }, height: 6 },  // Building B
-      { min: { x: -22, z: -12 }, max: { x: -12, z: -2 }, height: 8 }, // Building C
-      { min: { x: 12, z: 12 }, max: { x: 22, z: 22 }, height: 12 },   // Building D
-      { min: { x: -6, z: -4 }, max: { x: 6, z: 4 }, height: 2.5 },    // Center Vehicles
-      { min: { x: -28, z: -8 }, max: { x: -22, z: 8 }, height: 15 },  // Tall corner NW
-      { min: { x: 22, z: -8 }, max: { x: 28, z: 8 }, height: 15 },    // Tall corner SE
-      // Extra obstacles for complexity
-      { min: { x: -8, z: -18 }, max: { x: 8, z: -12 }, height: 6 },
-      { min: { x: -8, z: 12 }, max: { x: 8, z: 18 }, height: 6 },
-      { min: { x: -28, z: -28 }, max: { x: -20, z: -20 }, height: 8 },
-      { min: { x: 20, z: 20 }, max: { x: 28, z: 28 }, height: 8 }
+      // Massive central rock pillar
+      { shape: 'cylinder', min: { x: -12, z: -12 }, max: { x: 12, z: 12 }, height: 18, color: [0.15, 0.12, 0.1] },
+      // Glowing crystals around center
+      { shape: 'cylinder', min: { x: -15, z: 0 }, max: { x: -13, z: 2 }, height: 6, color: [0.1, 0.9, 0.8], emissive: [0.1, 0.6, 0.5] },
+      { shape: 'cylinder', min: { x: 13, z: -2 }, max: { x: 15, z: 0 }, height: 7, color: [0.8, 0.2, 0.9], emissive: [0.5, 0.1, 0.6] },
+      // North & South divider walls (creating tunnels)
+      { min: { x: -40, z: -15 }, max: { x: -20, z: -5 }, height: 18, color: [0.15, 0.12, 0.1] },
+      { min: { x: 20, z: 5 }, max: { x: 40, z: 15 }, height: 18, color: [0.15, 0.12, 0.1] },
+      // East & West tunnels
+      { min: { x: -15, z: 20 }, max: { x: -5, z: 40 }, height: 18, color: [0.15, 0.12, 0.1] },
+      { min: { x: 5, z: -40 }, max: { x: 15, z: -20 }, height: 18, color: [0.15, 0.12, 0.1] },
+      // Scattered stalagmites (cylinders)
+      { shape: 'cylinder', min: { x: -25, z: -25 }, max: { x: -20, z: -20 }, height: 8, color: [0.2, 0.18, 0.15] },
+      { shape: 'cylinder', min: { x: 20, z: 20 }, max: { x: 25, z: 25 }, height: 9, color: [0.2, 0.18, 0.15] },
+      { shape: 'cylinder', min: { x: -30, z: 30 }, max: { x: -27, z: 33 }, height: 5, color: [0.2, 0.18, 0.15] },
+      { shape: 'cylinder', min: { x: 30, z: -30 }, max: { x: 33, z: -27 }, height: 6, color: [0.2, 0.18, 0.15] },
+      // Crystal clusters for cover
+      { min: { x: 0, z: -22 }, max: { x: 4, z: -18 }, height: 3, color: [0.2, 0.8, 0.4], emissive: [0.1, 0.4, 0.2], rotY: 0.5 },
+      { min: { x: -4, z: 18 }, max: { x: 0, z: 22 }, height: 4, color: [0.2, 0.4, 0.8], emissive: [0.1, 0.2, 0.4], rotY: -0.3 },
+      { min: { x: -22, z: 0 }, max: { x: -18, z: 4 }, height: 3.5, color: [0.9, 0.3, 0.2], emissive: [0.4, 0.1, 0.1], rotY: 0.2 },
+      { min: { x: 18, z: -4 }, max: { x: 22, z: 0 }, height: 3, color: [0.8, 0.8, 0.2], emissive: [0.4, 0.4, 0.1], rotY: -0.4 },
     ]
   },
-  plaza: {
-    id: 'plaza',
-    name: 'City Plaza',
-    theme: 'downtown',
-    size: { x: 80, z: 80 },
+
+  // ─── MAP 3: DESERT FORTRESS ─────────────────────────────────────────────────
+  fortress: {
+    id: 'fortress',
+    name: 'Desert Fortress',
+    theme: 'fortress',
+    size: { x: 110, z: 110 },
     spawnPoints: {
       ffa: [
-        { x: -35, y: 1.8, z: -35 }, { x: 35, y: 1.8, z: -35 },
-        { x: -35, y: 1.8, z: 35 },  { x: 35, y: 1.8, z: 35 },
-        { x: 0, y: 1.8, z: 35 },    { x: 0, y: 1.8, z: -35 },
-        { x: -35, y: 1.8, z: 0 },   { x: 35, y: 1.8, z: 0 }
+        { x: -45, y: 1.8, z: -45 }, { x: 45, y: 1.8, z: -45 },
+        { x: -45, y: 1.8, z: 45 },  { x: 45, y: 1.8, z: 45 },
+        { x: 0, y: 1.8, z: -40 },   { x: 0, y: 1.8, z: 40 },
+        { x: -20, y: 1.8, z: 0 },   { x: 20, y: 1.8, z: 0 },
+        { x: -15, y: 1.8, z: -35 }, { x: 15, y: 1.8, z: 35 }
       ],
       team: [
-        [{ x: -30, y: 1.8, z: -30 }, { x: -35, y: 1.8, z: -25 }, { x: -25, y: 1.8, z: -35 }, { x: -30, y: 1.8, z: -25 }, { x: -25, y: 1.8, z: -30 }, { x: -35, y: 1.8, z: -35 }],
-        [{ x: 30, y: 1.8, z: 30 }, { x: 35, y: 1.8, z: 25 }, { x: 25, y: 1.8, z: 35 }, { x: 30, y: 1.8, z: 25 }, { x: 25, y: 1.8, z: 30 }, { x: 35, y: 1.8, z: 35 }]
+        [ { x: -45, y: 1.8, z: 0 }, { x: -40, y: 1.8, z: 5 }, { x: -40, y: 1.8, z: -5 }, { x: -35, y: 1.8, z: 0 }, { x: -45, y: 1.8, z: 10 }, { x: -45, y: 1.8, z: -10 } ],
+        [ { x: 45, y: 1.8, z: 0 }, { x: 40, y: 1.8, z: 5 }, { x: 40, y: 1.8, z: -5 }, { x: 35, y: 1.8, z: 0 }, { x: 45, y: 1.8, z: 10 }, { x: 45, y: 1.8, z: -10 } ]
       ]
     },
+    bombSites: { A: { x: 0, y: 0, z: 30 }, B: { x: 0, y: 0, z: -30 } },
+    controlPoints: { A: { x: -25, y: 0, z: 25 }, B: { x: 0, y: 0, z: 0 }, C: { x: 25, y: 0, z: -25 } },
     obstacles: [
-      // Central monument / cover
-      { type: 'watertower', min: { x: -3, z: -3 }, max: { x: 3, z: 3 }, height: 10 },
-      // Four outer corners (Tall buildings)
-      { type: 'building_H', min: { x: -38, z: -38 }, max: { x: -22, z: -22 }, height: 20 },
-      { type: 'building_H', min: { x: 22, z: -38 }, max: { x: 38, z: -22 }, height: 20 },
-      { type: 'building_H', min: { x: -38, z: 22 }, max: { x: -22, z: 38 }, height: 20 },
-      { type: 'building_H', min: { x: 22, z: 22 }, max: { x: 38, z: 38 }, height: 20 },
-      // Scattered cover (benches, dumpsters, cars)
-      { type: 'dumpster', min: { x: -12, z: -2 }, max: { x: -8, z: 2 }, height: 2 },
-      { type: 'dumpster', min: { x: 8, z: -2 }, max: { x: 12, z: 2 }, height: 2 },
-      { type: 'car_hatchback', min: { x: -2, z: 15 }, max: { x: 2, z: 20 }, height: 3 },
-      { type: 'car_stationwagon', min: { x: -2, z: -20 }, max: { x: 2, z: -15 }, height: 3 },
-      { type: 'bench', min: { x: -15, z: -15 }, max: { x: -13, z: -11 }, height: 1.5 },
-      { type: 'bench', min: { x: 13, z: 11 }, max: { x: 15, z: 15 }, height: 1.5 },
-      { type: 'bush', min: { x: 15, z: -15 }, max: { x: 18, z: -12 }, height: 2 },
-      { type: 'bush', min: { x: -18, z: 12 }, max: { x: -15, z: 15 }, height: 2 }
+      // Central Courtyard structure
+      { min: { x: -8, z: -8 }, max: { x: 8, z: 8 }, height: 6, color: [0.7, 0.55, 0.35] },
+      { shape: 'cylinder', min: { x: -4, z: -4 }, max: { x: 4, z: 4 }, height: 12, color: [0.6, 0.45, 0.25] },
+      // Inner walls
+      { min: { x: -20, z: -25 }, max: { x: -16, z: -10 }, height: 8, color: [0.75, 0.6, 0.4] },
+      { min: { x: 16, z: 10 }, max: { x: 20, z: 25 }, height: 8, color: [0.75, 0.6, 0.4] },
+      { min: { x: -25, z: 16 }, max: { x: -10, z: 20 }, height: 8, color: [0.75, 0.6, 0.4] },
+      { min: { x: 10, z: -20 }, max: { x: 25, z: -16 }, height: 8, color: [0.75, 0.6, 0.4] },
+      // Corner watchtowers (Cylinders)
+      { shape: 'cylinder', min: { x: -35, z: -35 }, max: { x: -25, z: -25 }, height: 15, color: [0.65, 0.5, 0.3] },
+      { shape: 'cylinder', min: { x: 25, z: 35 }, max: { x: 35, z: 25 }, height: 15, color: [0.65, 0.5, 0.3] },
+      { shape: 'cylinder', min: { x: -35, z: 25 }, max: { x: -25, z: 35 }, height: 15, color: [0.65, 0.5, 0.3] },
+      { shape: 'cylinder', min: { x: 25, z: -35 }, max: { x: 35, z: -25 }, height: 15, color: [0.65, 0.5, 0.3] },
+      // Sandbags / low cover blocks
+      { min: { x: -12, z: -35 }, max: { x: -6, z: -32 }, height: 1.5, color: [0.8, 0.7, 0.5] },
+      { min: { x: 6, z: 32 }, max: { x: 12, z: 35 }, height: 1.5, color: [0.8, 0.7, 0.5] },
+      { min: { x: -35, z: 6 }, max: { x: -32, z: 12 }, height: 1.5, color: [0.8, 0.7, 0.5] },
+      { min: { x: 32, z: -12 }, max: { x: 35, z: -6 }, height: 1.5, color: [0.8, 0.7, 0.5] },
+      // Angled barricades
+      { min: { x: -15, z: 0 }, max: { x: -12, z: 8 }, height: 3, color: [0.5, 0.4, 0.3], rotY: 0.5 },
+      { min: { x: 12, z: -8 }, max: { x: 15, z: 0 }, height: 3, color: [0.5, 0.4, 0.3], rotY: 0.5 },
     ]
   },
-  suburbs: {
-    id: 'suburbs',
-    name: 'Suburban Street',
-    theme: 'downtown',
-    size: { x: 100, z: 40 },
+
+  // ─── MAP 4: ARCTIC OUTPOST ──────────────────────────────────────────────────
+  arctic: {
+    id: 'arctic',
+    name: 'Arctic Outpost',
+    theme: 'arctic',
+    size: { x: 140, z: 80 },
     spawnPoints: {
       ffa: [
-        { x: -45, y: 1.8, z: 0 }, { x: 45, y: 1.8, z: 0 },
-        { x: -25, y: 1.8, z: 15 }, { x: 25, y: 1.8, z: 15 },
-        { x: -25, y: 1.8, z: -15 }, { x: 25, y: 1.8, z: -15 },
-        { x: 0, y: 1.8, z: 15 }, { x: 0, y: 1.8, z: -15 }
+        { x: -55, y: 1.8, z: 8 }, { x: 55, y: 1.8, z: -8 },
+        { x: -30, y: 1.8, z: 8 }, { x: 30, y: 1.8, z: -8 },
+        { x: -30, y: 1.8, z: -8 }, { x: 30, y: 1.8, z: 8 },
+        { x: -5, y: 1.8, z: 8 }, { x: 5, y: 1.8, z: -8 },
+        { x: -18, y: 1.8, z: 0 }, { x: 18, y: 1.8, z: 0 }
       ],
       team: [
-        [{ x: -45, y: 1.8, z: 0 }, { x: -40, y: 1.8, z: 5 }, { x: -40, y: 1.8, z: -5 }, { x: -45, y: 1.8, z: 5 }, { x: -45, y: 1.8, z: -5 }, { x: -35, y: 1.8, z: 0 }],
-        [{ x: 45, y: 1.8, z: 0 }, { x: 40, y: 1.8, z: 5 }, { x: 40, y: 1.8, z: -5 }, { x: 45, y: 1.8, z: 5 }, { x: 45, y: 1.8, z: -5 }, { x: 35, y: 1.8, z: 0 }]
+        [{ x: -60, y: 1.8, z: 0 }, { x: -55, y: 1.8, z: 5 }, { x: -55, y: 1.8, z: -5 }, { x: -50, y: 1.8, z: 10 }, { x: -50, y: 1.8, z: -10 }, { x: -45, y: 1.8, z: 0 }],
+        [{ x: 60, y: 1.8, z: 0 }, { x: 55, y: 1.8, z: 5 }, { x: 55, y: 1.8, z: -5 }, { x: 50, y: 1.8, z: 10 }, { x: 50, y: 1.8, z: -10 }, { x: 45, y: 1.8, z: 0 }]
       ]
     },
+    bombSites: { A: { x: -35, y: 0, z: 25 }, B: { x: 35, y: 0, z: -25 } },
+    controlPoints: { A: { x: -45, y: 0, z: 0 }, B: { x: 0, y: 0, z: 0 }, C: { x: 45, y: 0, z: 0 } },
     obstacles: [
-      // Top row of houses
-      { type: 'building_B', min: { x: -30, z: 8 }, max: { x: -20, z: 18 }, height: 8 },
-      { type: 'building_C', min: { x: -10, z: 8 }, max: { x: 0, z: 18 }, height: 8 },
-      { type: 'building_A', min: { x: 10, z: 8 }, max: { x: 20, z: 18 }, height: 8 },
-      { type: 'building_E', min: { x: 30, z: 8 }, max: { x: 40, z: 18 }, height: 8 },
-      // Bottom row of houses
-      { type: 'building_F', min: { x: -30, z: -18 }, max: { x: -20, z: -8 }, height: 8 },
-      { type: 'building_A', min: { x: -10, z: -18 }, max: { x: 0, z: -8 }, height: 8 },
-      { type: 'building_D', min: { x: 10, z: -18 }, max: { x: 20, z: -8 }, height: 8 },
-      { type: 'building_C', min: { x: 30, z: -18 }, max: { x: 40, z: -8 }, height: 8 },
-      // Cars on the street (Z=0)
-      { type: 'car_sedan', min: { x: -15, z: -2 }, max: { x: -11, z: 2 }, height: 3 },
-      { type: 'car_taxi', min: { x: 5, z: -2 }, max: { x: 9, z: 2 }, height: 3 },
-      { type: 'car_police', min: { x: 25, z: -2 }, max: { x: 29, z: 2 }, height: 3 },
-      // Streetlights and hydrants
-      { type: 'streetlight', min: { x: -20, z: 5 }, max: { x: -19, z: 6 }, height: 5 },
-      { type: 'streetlight', min: { x: 20, z: -6 }, max: { x: 21, z: -5 }, height: 5 },
-      { type: 'firehydrant', min: { x: 0, z: 6 }, max: { x: 1, z: 7 }, height: 1.5 }
+      // Main hanger (South)
+      { min: { x: -20, z: -35 }, max: { x: 20, z: -15 }, height: 12, color: [0.6, 0.7, 0.8] },
+      // Server/Comms building (North)
+      { min: { x: -15, z: 15 }, max: { x: 15, z: 30 }, height: 8, color: [0.5, 0.6, 0.75] },
+      // Antenna tower
+      { shape: 'cylinder', min: { x: 0, z: 20 }, max: { x: 4, z: 24 }, height: 25, color: [0.3, 0.35, 0.4], emissive: [0.5, 0.1, 0.1] },
+      
+      // Shipping containers (Blue, Orange, Green) - Angled for interesting firefights
+      { min: { x: -35, z: -10 }, max: { x: -25, z: -6 }, height: 4, color: [0.2, 0.4, 0.8], rotY: 0.2 },
+      { min: { x: -40, z: 10 }, max: { x: -30, z: 14 }, height: 4, color: [0.8, 0.4, 0.1], rotY: -0.1 },
+      { min: { x: 25, z: 6 }, max: { x: 35, z: 10 }, height: 4, color: [0.2, 0.7, 0.3], rotY: 0.15 },
+      { min: { x: 30, z: -14 }, max: { x: 40, z: -10 }, height: 4, color: [0.8, 0.4, 0.1], rotY: -0.2 },
+      { min: { x: -10, z: 0 }, max: { x: -2, z: 4 }, height: 4, color: [0.2, 0.4, 0.8], rotY: 0 },
+      { min: { x: 2, z: -4 }, max: { x: 10, z: 0 }, height: 4, color: [0.2, 0.7, 0.3], rotY: 0 },
+
+      // Snowbanks / low cover
+      { min: { x: -55, z: -25 }, max: { x: -45, z: -20 }, height: 2, color: [0.9, 0.95, 1.0] },
+      { min: { x: 45, z: 20 }, max: { x: 55, z: 25 }, height: 2, color: [0.9, 0.95, 1.0] },
+      { min: { x: -25, z: 25 }, max: { x: -15, z: 30 }, height: 2, color: [0.9, 0.95, 1.0] },
+      { min: { x: 15, z: -30 }, max: { x: 25, z: -25 }, height: 2, color: [0.9, 0.95, 1.0] },
+
+      // Radar domes (Cylinders)
+      { shape: 'cylinder', min: { x: -55, z: 20 }, max: { x: -45, z: 30 }, height: 6, color: [0.85, 0.9, 0.95] },
+      { shape: 'cylinder', min: { x: 45, z: -30 }, max: { x: 55, z: -20 }, height: 6, color: [0.85, 0.9, 0.95] },
     ]
   }
 };
@@ -183,9 +211,9 @@ class GameRoom {
     this.id = id;
     this.name = options.name || `Room ${id.slice(0, 4)}`;
     this.modeId = options.mode || 'tdm';
-    this.mapId = options.map || 'warehouse';
-    this.map = MAPS[this.mapId];
-    this.mode = GAME_MODES[this.modeId];
+    this.mapId = options.map || 'city';
+    this.map = MAPS[this.mapId] || MAPS['city'];
+    this.mode = GAME_MODES[this.modeId] || GAME_MODES['tdm'];
     this.maxPlayers = options.maxPlayers || this.mode.maxPlayers;
     this.botCount = options.bots || 0;
     this.password = options.password || null;
@@ -253,6 +281,8 @@ class GameRoom {
       const name = BOT_NAMES[i % BOT_NAMES.length];
       const team = this.gameState.getSpawnTeam(this.players.size + this.bots.size);
       const bot = new Bot(id, `[BOT] ${name}`, team, 'random');
+      // Set map size so bot waypoints and bounds scale correctly
+      bot._mapSize = Math.max(this.map.size?.x || 60, this.map.size?.z || 60);
       const spawn = this.getSpawnPoint(team);
       bot.respawn(spawn);
       this.bots.set(id, bot);
@@ -461,8 +491,18 @@ class GameRoom {
     this.sendTo(playerId, {
       type: 'ammo_update',
       ammo: player.ammo[player.currentWeapon],
-      reserveAmmo: player.reserveAmmo[player.currentWeapon]
+      reserveAmmo: 99999
     });
+
+    // Auto-reload when magazine empties
+    if (player.ammo[player.currentWeapon] <= 0 && !player.reloading) {
+      player.startReload();
+      this.broadcast({
+        type: 'player_reload',
+        playerId,
+        weaponId: player.currentWeapon
+      });
+    }
 
     if (hitResult) {
       this.processHit(playerId, hitResult);
@@ -470,9 +510,10 @@ class GameRoom {
   }
 
   handleBotShoot(bot, direction) {
-    // Simple ray against all players
     const allTargets = [...this.players.values(), ...this.bots.values()]
       .filter(p => p.id !== bot.id && p.alive && (p.team !== bot.team || bot.team < 0));
+
+    const mapObstacles = this.map?.obstacles || [];
 
     for (const target of allTargets) {
       const dx = target.position.x - bot.position.x;
@@ -480,17 +521,31 @@ class GameRoom {
       const dz = target.position.z - bot.position.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-      // Simple cone check
+      // Cone check — is the bot aiming at this target?
       const dotProduct = (direction.x * dx + direction.y * dy + direction.z * dz) / dist;
       if (dotProduct > 0.9) {
+        // ★ WALL CHECK — does a wall block the shot?
+        let blocked = false;
+        const dirX = dx / dist;
+        const dirZ = dz / dist;
+        for (const obs of mapObstacles) {
+          const hit = this.rayBoxIntersect(bot.position, { x: dirX, y: dy / dist, z: dirZ },
+            obs.min, obs.max, obs.height || 3);
+          if (hit && hit.distance < dist) {
+            blocked = true;
+            break;
+          }
+        }
+        if (blocked) continue;
+
         const weapon = WEAPONS[bot.currentWeapon];
-        const damage = calculateDamage(bot.currentWeapon, dist, Math.random() < 0.1, target.moving);
+        const damage = calculateDamage(bot.currentWeapon, dist, Math.random() < (bot.settings?.headShotChance || 0.1), target.moving);
 
         if (damage > 0) {
           const hitResult = {
             targetId: target.id,
             damage,
-            headshot: Math.random() < 0.1,
+            headshot: Math.random() < (bot.settings?.headShotChance || 0.1),
             distance: dist
           };
           this.processHit(bot.id, hitResult);
@@ -559,9 +614,9 @@ class GameRoom {
       );
 
       if (hit && hit.distance < closestDist) {
-        // Determine headshot
+        // Determine headshot (top 0.3 units of the player)
         const hitY = shotData.position.y + dir.y * hit.distance;
-        const headThreshold = target.position.y + (target.crouching ? 0.8 : 1.4);
+        const headThreshold = target.position.y - 0.3; // position.y is the camera/head level
         const isHeadshot = hitY > headThreshold;
 
         closestDist = hit.distance;
@@ -593,8 +648,14 @@ class GameRoom {
     if (t < 0) return null;
 
     // Check height
+    // center.y is the camera/eye level. 
+    // Feet are at (center.y - height).
+    // Top of head is slightly above center.y.
     const hitY = origin.y + dir.y * t;
-    if (hitY < center.y - 0.5 || hitY > center.y + height * 0.5) return null;
+    const footY = center.y - height;
+    const headY = center.y + 0.2;
+
+    if (hitY < footY || hitY > headY) return null;
 
     return { distance: t };
   }

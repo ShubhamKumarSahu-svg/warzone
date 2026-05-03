@@ -133,8 +133,9 @@ class Player {
     const weapon = WEAPONS[this.currentWeapon];
     if (!weapon) return false;
 
+    // Don't reload if magazine is already full
     if (this.ammo[this.currentWeapon] >= weapon.magazine_size) return false;
-    if (this.reserveAmmo[this.currentWeapon] <= 0) return false;
+    // Reserve is infinite — no check needed
 
     this.reloading = true;
     this.reloadEndTime = Date.now() + weapon.reload_time;
@@ -145,11 +146,8 @@ class Player {
     if (!this.reloading) return;
 
     const weapon = WEAPONS[this.currentWeapon];
-    const needed = weapon.magazine_size - this.ammo[this.currentWeapon];
-    const available = Math.min(needed, this.reserveAmmo[this.currentWeapon]);
-
-    this.ammo[this.currentWeapon] += available;
-    this.reserveAmmo[this.currentWeapon] -= available;
+    // Infinite reserve — always fill magazine to full
+    this.ammo[this.currentWeapon] = weapon.magazine_size;
     this.reloading = false;
     this.consecutiveShots = 0;
   }

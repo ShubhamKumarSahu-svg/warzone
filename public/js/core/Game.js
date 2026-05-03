@@ -125,7 +125,7 @@ class Game {
         new BABYLON.Vector3(playerData.position.x, playerData.position.y, playerData.position.z),
         this.scene);
       this.camera.minZ = 0.1;
-      this.camera.maxZ = 300;
+      this.camera.maxZ = 500;
       this.camera.fov = 1.2;
       this.camera.inertia = 0;
       this.camera.angularSensibility = 99999;
@@ -142,27 +142,13 @@ class Game {
       this.playerController = new PlayerController(this);
       this.fxManager = new VisualFXManager(this.scene, this.camera);
 
-      // Asset loading
-      this.assetLoader = new AssetLoader(this.scene);
+      // Asset loading (Skipped - Fully Procedural)
       const loadingFill = document.getElementById('loading-fill');
-      this.assetLoader.onProgress = (pct, label) => {
-        if (loadingFill) loadingFill.style.width = (30 + pct * 0.5) + '%';
-        const tipEl = document.getElementById('loading-tip');
-        if (tipEl) tipEl.textContent = label;
-      };
-
-      try {
-        await Promise.race([
-          this.assetLoader.preloadAll(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
-        ]);
-      } catch (err) {
-        console.warn('[Game] Asset load incomplete, using fallbacks:', err.message);
-      }
+      if (loadingFill) loadingFill.style.width = '80%';
 
       // Build map
       this.map = new MapManager(this.scene);
-      this.map.buildMap(this.mapData, this.assetLoader);
+      this.map.buildMap(this.mapData);
 
       // [G4] Weapon model + wire muzzle flash into fxManager
       this.createWeaponModel();
@@ -199,40 +185,14 @@ class Game {
   createWeaponModel() {
     if (this.weaponRoot) { this.weaponRoot.dispose(); this.weaponRoot = null; }
 
-    const root = new BABYLON.TransformNode('weaponRoot', this.scene);
+    const weaponId = this.weapons.currentWeapon;
+    
+    // Build procedural weapon
+    const root = window.WeaponBuilder.buildWeaponModel(weaponId, this.scene);
     root.parent = this.camera;
     root.position = this.weaponRestPos.clone();
     this.weaponRoot = root;
-
-    const weaponId = this.weapons.currentWeapon;
-    const glbModel = this.assetLoader
-      ? this.assetLoader.createWeaponViewmodel(weaponId, root)
-      : null;
-
-    if (glbModel) {
-      this.weaponMesh = glbModel;
-    } else {
-      // Fallback block gun
-      const gunMat = new BABYLON.StandardMaterial('gunMat', this.scene);
-      gunMat.diffuseColor = new BABYLON.Color3(0.15, 0.15, 0.17);
-      gunMat.specularColor = new BABYLON.Color3(0.4, 0.4, 0.4);
-      gunMat.specularPower = 64;
-      const gunMat2 = new BABYLON.StandardMaterial('gunMat2', this.scene);
-      gunMat2.diffuseColor = new BABYLON.Color3(0.08, 0.08, 0.1);
-      gunMat2.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
-
-      const barrel = BABYLON.MeshBuilder.CreateBox('barrel', { width: 0.04, height: 0.04, depth: 0.45 }, this.scene);
-      barrel.parent = root; barrel.position.set(0, 0.02, 0.15); barrel.material = gunMat;
-      const body = BABYLON.MeshBuilder.CreateBox('body', { width: 0.06, height: 0.1, depth: 0.22 }, this.scene);
-      body.parent = root; body.position.set(0, 0, -0.02); body.material = gunMat2;
-      const mag = BABYLON.MeshBuilder.CreateBox('mag', { width: 0.04, height: 0.12, depth: 0.06 }, this.scene);
-      mag.parent = root; mag.position.set(0, -0.1, 0); mag.rotation.x = 0.15; mag.material = gunMat;
-      const grip = BABYLON.MeshBuilder.CreateBox('grip', { width: 0.04, height: 0.1, depth: 0.04 }, this.scene);
-      grip.parent = root; grip.position.set(0, -0.1, -0.1); grip.rotation.x = 0.3; grip.material = gunMat2;
-      const stock = BABYLON.MeshBuilder.CreateBox('stock', { width: 0.05, height: 0.06, depth: 0.12 }, this.scene);
-      stock.parent = root; stock.position.set(0, 0.01, -0.18); stock.material = gunMat;
-      this.weaponMesh = body;
-    }
+    this.weaponMesh = root;
 
     // Muzzle flash plane
     const flash = BABYLON.MeshBuilder.CreatePlane('muzzle', { size: 0.15 }, this.scene);
@@ -243,6 +203,9 @@ class Game {
     flash.material = flashMat;
     flash.parent = root;
     flash.position.set(0, 0.02, 0.42);
+    if (weaponId === 'awp') flash.position.set(0, 0.01, 0.8);
+    if (weaponId === 'auto_pistol') flash.position.set(0, 0.02, 0.25);
+    
     flash.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
     this.muzzleFlash = flash;
 
@@ -304,13 +267,13 @@ class Game {
     net.on('damage_taken', (msg) => { this.ui.showDamageIndicator(); this.ui.updateHealth(msg.health); });
     net.on('ammo_update', (msg) => {
       this.weapons.ammo = msg.ammo;
-      this.weapons.reserveAmmo = msg.reserveAmmo;
-      this.ui.updateAmmo(msg.ammo, msg.reserveAmmo);
+      this.weapons.reserveAmmo = 999; // Always show infinite
+      this.ui.updateAmmo(msg.ammo, '∞');
     });
 
     net.on('reload_complete', (msg) => {
       this.weapons.ammo = msg.ammo;
-      this.weapons.reserveAmmo = msg.reserveAmmo;
+      this.weapons.reserveAmmo = 999;
       this.weapons.reloading = false;
       this.isReloadAnimating = false;
       if (this.weaponRoot) {
@@ -318,7 +281,7 @@ class Game {
         this.weaponRoot.rotation.x = 0;
       }
       this.ui.showReloading(false);
-      this.ui.updateAmmo(msg.ammo, msg.reserveAmmo);
+      this.ui.updateAmmo(msg.ammo, '∞');
     });
 
     net.on('player_killed', (msg) => {
@@ -337,9 +300,9 @@ class Game {
         || (this.map ? this.map.getRandomSpawnPoint(this.team) : { x: 0, y: 1.8, z: 0 });
       this.camera.position.set(spawnPos.x, spawnPos.y, spawnPos.z);
       this.velocity = { x: 0, y: 0, z: 0 };
-      this.weapons.setWeapon(msg.player.currentWeapon, msg.player.ammo, msg.player.reserveAmmo);
+      this.weapons.setWeapon(msg.player.currentWeapon, msg.player.ammo, 999);
       this.ui.updateHealth(msg.player.health);
-      this.ui.updateAmmo(msg.player.ammo, msg.player.reserveAmmo);
+      this.ui.updateAmmo(msg.player.ammo, '∞');
     });
 
     net.on('player_respawn', (msg) => {
@@ -491,33 +454,78 @@ class Game {
     this._playOtherPlayerAnim(this.otherPlayers[data.id], 'idle');
   }
 
-  // Fallback block-character when no GLB is loaded
+  // Fallback egg-character when no GLB is loaded
+  // Includes procedural leg/arm swing animation for movement
   _buildFallbackCharacter(data) {
     const root = new BABYLON.TransformNode(`proot_${data.id}`, this.scene);
-    root.position.set(data.position.x, data.position.y - 0.9, data.position.z);
+    root.position.set(data.position.x, data.position.y - 1.8, data.position.z);
 
     const bodyMat = this.sharedMaterials.team[data.team] || this.sharedMaterials.team[2];
     const skinMat = this.sharedMaterials.skin;
     const darkMat = this.sharedMaterials.dark;
 
-    const torso = BABYLON.MeshBuilder.CreateBox(`torso_${data.id}`, { width: 0.5, height: 0.65, depth: 0.3 }, this.scene);
-    torso.parent = root; torso.position.y = 0.55; torso.material = bodyMat;
-    const head = BABYLON.MeshBuilder.CreateSphere(`head_${data.id}`, { diameter: 0.38, segments: 10 }, this.scene);
-    head.parent = root; head.position.y = 1.15; head.material = skinMat;
-    const helmet = BABYLON.MeshBuilder.CreateSphere(`helmet_${data.id}`, { diameter: 0.42, segments: 8 }, this.scene);
-    helmet.parent = root; helmet.position.y = 1.2; helmet.material = darkMat;
-    const armL = BABYLON.MeshBuilder.CreateBox(`armL_${data.id}`, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
-    armL.parent = root; armL.position.set(-0.35, 0.55, 0); armL.material = bodyMat;
-    const armR = BABYLON.MeshBuilder.CreateBox(`armR_${data.id}`, { width: 0.15, height: 0.55, depth: 0.15 }, this.scene);
-    armR.parent = root; armR.position.set(0.35, 0.55, 0); armR.material = bodyMat;
-    const legL = BABYLON.MeshBuilder.CreateBox(`legL_${data.id}`, { width: 0.18, height: 0.5, depth: 0.18 }, this.scene);
-    legL.parent = root; legL.position.set(-0.13, 0, 0); legL.material = darkMat;
-    const legR = BABYLON.MeshBuilder.CreateBox(`legR_${data.id}`, { width: 0.18, height: 0.5, depth: 0.18 }, this.scene);
-    legR.parent = root; legR.position.set(0.13, 0, 0); legR.material = darkMat;
-    const gun = BABYLON.MeshBuilder.CreateBox(`gun_${data.id}`, { width: 0.04, height: 0.04, depth: 0.35 }, this.scene);
-    gun.parent = root; gun.position.set(0.3, 0.5, 0.2); gun.material = darkMat;
+    // The funny egg body
+    const egg = BABYLON.MeshBuilder.CreateSphere(`egg_${data.id}`, { diameter: 1.0, segments: 16 }, this.scene);
+    egg.scaling.y = 1.4; // Make it egg shaped
+    egg.position.y = 0.8;
+    egg.material = bodyMat;
+    egg.parent = root;
 
-    if (this.map) this.map.addShadowCaster(torso);
+    // Funny big eyes
+    const eyeL = BABYLON.MeshBuilder.CreateSphere(`eyeL_${data.id}`, { diameter: 0.25 }, this.scene);
+    eyeL.position.set(-0.2, 1.1, 0.45);
+    eyeL.material = skinMat; // White-ish skin material can work for eyeballs
+    eyeL.parent = root;
+
+    const eyeR = BABYLON.MeshBuilder.CreateSphere(`eyeR_${data.id}`, { diameter: 0.25 }, this.scene);
+    eyeR.position.set(0.2, 1.1, 0.45);
+    eyeR.material = skinMat;
+    eyeR.parent = root;
+
+    // Pupils
+    const pupilL = BABYLON.MeshBuilder.CreateSphere(`pupilL_${data.id}`, { diameter: 0.1 }, this.scene);
+    pupilL.position.set(-0.2, 1.1, 0.55);
+    pupilL.material = darkMat;
+    pupilL.parent = root;
+
+    const pupilR = BABYLON.MeshBuilder.CreateSphere(`pupilR_${data.id}`, { diameter: 0.1 }, this.scene);
+    pupilR.position.set(0.2, 1.1, 0.55);
+    pupilR.material = darkMat;
+    pupilR.parent = root;
+
+    // Arms with pivot nodes for swing animation (floating little spheres)
+    const armPivotL = new BABYLON.TransformNode(`armPivotL_${data.id}`, this.scene);
+    armPivotL.parent = root; armPivotL.position.set(-0.65, 0.8, 0);
+    const armL = BABYLON.MeshBuilder.CreateSphere(`armL_${data.id}`, { diameter: 0.25 }, this.scene);
+    armL.parent = armPivotL; armL.position.y = -0.2; armL.material = skinMat;
+
+    const armPivotR = new BABYLON.TransformNode(`armPivotR_${data.id}`, this.scene);
+    armPivotR.parent = root; armPivotR.position.set(0.65, 0.8, 0);
+    const armR = BABYLON.MeshBuilder.CreateSphere(`armR_${data.id}`, { diameter: 0.25 }, this.scene);
+    armR.parent = armPivotR; armR.position.y = -0.2; armR.material = skinMat;
+
+    // Legs with pivot nodes for swing animation (flat floating shoes)
+    const legPivotL = new BABYLON.TransformNode(`legPivotL_${data.id}`, this.scene);
+    legPivotL.parent = root; legPivotL.position.set(-0.25, 0.25, 0);
+    const legL = BABYLON.MeshBuilder.CreateSphere(`legL_${data.id}`, { diameter: 0.3 }, this.scene);
+    legL.scaling.y = 0.5; legL.scaling.z = 1.5;
+    legL.parent = legPivotL; legL.position.y = -0.2; legL.material = darkMat;
+
+    const legPivotR = new BABYLON.TransformNode(`legPivotR_${data.id}`, this.scene);
+    legPivotR.parent = root; legPivotR.position.set(0.25, 0.25, 0);
+    const legR = BABYLON.MeshBuilder.CreateSphere(`legR_${data.id}`, { diameter: 0.3 }, this.scene);
+    legR.scaling.y = 0.5; legR.scaling.z = 1.5;
+    legR.parent = legPivotR; legR.position.y = -0.2; legR.material = darkMat;
+
+    const gun = BABYLON.MeshBuilder.CreateBox(`gun_${data.id}`, { width: 0.08, height: 0.08, depth: 0.5 }, this.scene);
+    gun.parent = armPivotR; gun.position.set(0, -0.2, 0.2); gun.material = darkMat;
+
+    if (this.map) this.map.addShadowCaster(egg);
+
+    // Store limb pivots on root for procedural animation
+    root._limbPivots = { armPivotL, armPivotR, legPivotL, legPivotR };
+    root._limbPhase = 0;
+
     return root;
   }
 
@@ -648,7 +656,11 @@ class Game {
             this.fxManager.createBulletTrail(this.camera.position, aimDir);
             this.ui.updateCrosshairSpread(true);
 
-          } else if (this.weapons.ammo <= 0 && !this.weapons.reloading) {
+            // Auto-reload when magazine empties
+            if (this.weapons.needsAutoReload()) {
+              this._startReload();
+            }
+          } else if (this.weapons.needsAutoReload()) {
             this._startReload();
           }
         }
@@ -656,11 +668,16 @@ class Game {
       } else {
         this.weapons.shooting = false;
         this.ui.updateCrosshairSpread(false);
+
+        // Also auto-reload when not shooting and mag is empty
+        if (this.weapons.needsAutoReload()) {
+          this._startReload();
+        }
       }
 
-      if (this.input.consumeKey('KeyR') && !this.weapons.reloading) {
-        const wd = this.weapons.getWeaponData();
-        if (wd && this.weapons.ammo < wd.magSize) this._startReload();
+      // Manual reload — only if not full
+      if (this.input.consumeKey('KeyR') && this.weapons.canReload()) {
+        this._startReload();
       }
 
       if (this.input.consumeKey('KeyQ')) this.network.sendAbility();
@@ -700,13 +717,22 @@ class Game {
   updateReloadAnim(dt) {
     if (!this.isReloadAnimating || !this.weaponRoot) return;
 
-    this.reloadAnimProgress += dt * 2.0;
+    // Sync reload animation speed to the actual weapon's reload time
+    const wd = this.weapons.getWeaponData();
+    const reloadSec = wd ? wd.reloadTime / 1000 : 2.3;
+    // Animation has 2 phases (down + up), each takes half the reload time
+    // progress goes 0 → 2 over reloadSec
+    const animSpeed = 2.0 / reloadSec;
+
+    this.reloadAnimProgress += dt * animSpeed;
 
     if (this.reloadAnimProgress < 1.0) {
+      // Phase 1: weapon drops down and tilts
       const ease = this.reloadAnimProgress * this.reloadAnimProgress;
       this.weaponRoot.position = BABYLON.Vector3.Lerp(this.weaponRestPos, this.weaponReloadPos, ease);
       this.weaponRoot.rotation.x = ease * 0.5;
     } else if (this.reloadAnimProgress < 2.0) {
+      // Phase 2: weapon comes back up
       const t = this.reloadAnimProgress - 1.0;
       const ease = 1 - (1 - t) * (1 - t);
       this.weaponRoot.position = BABYLON.Vector3.Lerp(this.weaponReloadPos, this.weaponRestPos, ease);
@@ -786,6 +812,29 @@ class Game {
         this._playOtherPlayerAnim(op, dist > 2.0 ? 'run' : 'walk');
       } else {
         this._playOtherPlayerAnim(op, 'idle');
+      }
+
+      // Procedural limb animation for fallback box-characters
+      const pivots = op.mesh._limbPivots;
+      if (pivots) {
+        const isMoving = dist > 0.15;
+        if (isMoving) {
+          const speed = dist > 2.0 ? 14 : 8;
+          op.mesh._limbPhase = (op.mesh._limbPhase || 0) + dt * speed;
+          const swing = Math.sin(op.mesh._limbPhase) * 0.6;
+          // Legs swing opposite to each other
+          pivots.legPivotL.rotation.x = swing;
+          pivots.legPivotR.rotation.x = -swing;
+          // Arms counter-swing (natural walking motion)
+          pivots.armPivotL.rotation.x = -swing * 0.5;
+          pivots.armPivotR.rotation.x = swing * 0.5;
+        } else {
+          // Smoothly return to neutral
+          pivots.legPivotL.rotation.x *= 0.85;
+          pivots.legPivotR.rotation.x *= 0.85;
+          pivots.armPivotL.rotation.x *= 0.85;
+          pivots.armPivotR.rotation.x *= 0.85;
+        }
       }
     }
   }
